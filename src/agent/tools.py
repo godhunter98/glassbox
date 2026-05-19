@@ -7,7 +7,7 @@ import json
 import inspect
 from typing import get_type_hints
 
-from ui import (
+from agent.ui import (
     TOOL_COLOR,
     INFO_COLOR,
     RESET_COLOR,

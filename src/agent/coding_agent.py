@@ -7,14 +7,14 @@ from litellm import litellm
 import json
 from rich.live import Live
 from rich.markdown import Markdown
-from storage import queries
-from tools import (
+from agent.storage import queries
+from agent.tools import (
     get_tool_schema,
     tool_registry
 )
-from prompts import SYSTEM_PROMPT
-from animation import Spinner
-from ui import (
+from agent.prompts import SYSTEM_PROMPT
+from agent.animation import Spinner
+from agent.ui import (
     YOU_COLOR,
     ASSISTANT_COLOR,
     TOOL_COLOR,

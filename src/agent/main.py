@@ -1,6 +1,6 @@
 import os
-from coding_agent import agent_loop
-from animation import print_banner
+from agent.coding_agent import agent_loop
+from agent.animation import print_banner
 from dotenv import load_dotenv
 
 load_dotenv()

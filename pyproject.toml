@@ -10,6 +10,16 @@ dependencies = [
     "rich>=14.3.3",
 ]
 
+[project.scripts]
+agent = "agent.main:main"
+
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
 [dependency-groups]
 dev = [
     "pytest>=9.0.3",

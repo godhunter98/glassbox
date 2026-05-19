@@ -1,11 +1,10 @@
 import pathlib
 import sqlite3
 from contextlib import contextmanager
-from .db import init_db 
+from .db import init_db,DB_PATH
 
 _DB_INITIALIZED = False
 
-DB_PATH = pathlib.Path(__file__).parent/"agent_persistence.db"
 
 @contextmanager
 def get_db_cursor() -> sqlite3.Cursor:
