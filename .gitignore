@@ -31,3 +31,4 @@ decorators.py
 *.sqlite
 *.sqlite3
 schema.md
+.idea/

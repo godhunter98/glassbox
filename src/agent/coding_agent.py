@@ -225,6 +225,56 @@ def handle_assistant_message(assistant_message, conversation: List[Dict[str, Any
     for index, tool_call in enumerate(tool_calls, 1):
         run_tool_call(tool_call, conversation, index, db_msg_id)
 
+def load_conversation(conversation_id:int) -> List[Dict[str,Any]] | None:
+    conversation = [{"role":"system","content":SYSTEM_PROMPT}]
+    
+    db_messages = queries.get_conversation_messages(conversation_id)
+
+    for message in db_messages:
+        role = message["role"]
+
+        if role == "user":
+            conversation.append({"role":"user","content":message["content"]})
+        
+        elif role == "assistant":
+            # fetch any tool_calls associated with this assistant message
+            tool_calls = queries.get_tool_calls_for_message(message["message_id"])
+
+            if not tool_calls:
+                conversation.append({"role":"assistant","content":message["content"]})
+
+            else:
+                # 1. Reconstruct the tool_calls property for the assistant message
+                tc_list = []
+                tool_mssgs = []
+
+                for tc in tool_calls:
+                    call_id = f"call_{tc['tool_id']}"
+
+                    tc_list.append({
+                        "id": call_id,
+                        "type": "function",
+                        "function": {
+                            "name": tc["tool_name"],
+                            "arguments": tc["tool_args"]
+                        }
+                    })
+                    # 2. Prepare the matching 'tool' role message
+                    tool_mssgs.append({
+                        "role":"tool",
+                        "tool_call_id": call_id,
+                        "name":tc["tool_name"],
+                        "content":tc["tool_output"]
+                    })
+                conversation.append({
+                    "role":"assistant",
+                    "content":message["content"],
+                    "tool_calls":tc_list
+                })
+                conversation.extend(tool_mssgs)
+    
+    return conversation
+
 def generate_conversation_summary(conversation: List[Dict[str,Any]],model:str,api_key:str) -> str:
     '''Generate a summary from the completed conversation.'''
     print(f"\n{INFO_COLOR}Saving conversation...{RESET_COLOR}")

@@ -43,7 +43,7 @@ def start_conversation(model:str) -> int | None:
 def update_conversation_stats(conversation_id: int, total_tokens: int = 0, cost_per_token: dict = None):
     """Update token count and calculate approx cost for a conversation."""
     if cost_per_token is None:
-        cost_per_token = {"deepseek-v4-flash": 0.25, "deepseek-v4-pro": 0.70}
+        cost_per_token = {"deepseek/deepseek-v4-flash": 0.25, "deepseek/deepseek-v4-pro": 0.70}
 
     with get_db_cursor() as cursor:
         cursor.execute(
@@ -129,3 +129,40 @@ def get_conversation_messages(conversation_id: int):
             (conversation_id,),        
         )
         return cursor.fetchall()
+
+def get_conversation(conversation_id:int):
+    """Retrieve a single conversation to get baseline stats."""
+    with get_db_cursor() as cursor:
+        cursor.execute(
+        '''
+        SELECT * FROM conversations
+        WHERE conversation_id = ?
+        ''',
+        (conversation_id,),
+        )
+        return cursor.fetchone()
+    
+def get_tool_calls_for_message(message_id:int):
+    """Retrieve all tool calls for a given assistant message ID."""
+    with get_db_cursor() as cursor:
+        cursor.execute(
+            '''
+            SELECT * FROM tool_calls
+            WHERE message_id = ?
+            ORDER BY tool_id ASC
+            ''',
+            (message_id,),
+        )
+        return cursor.fetchall()
+    
+def resume_conversation(conversation_id: int):
+    """Re-activate an existing conversation by setting status to active and clearing ended_at."""
+    with get_db_cursor() as cursor:
+        cursor.execute(
+            """
+            UPDATE conversations 
+            SET status = 'active', ended_at = NULL
+            WHERE conversation_id = ?
+            """,
+            (conversation_id,),
+        )
