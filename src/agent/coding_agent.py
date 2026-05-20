@@ -7,6 +7,7 @@ from litellm import litellm
 import json
 from rich.live import Live
 from rich.markdown import Markdown
+from rich import print as rprint
 from agent.storage import queries
 from agent.tools import (
     get_tool_schema,
@@ -51,6 +52,119 @@ def build_messages(conversation: List[Dict[str, str]]) -> List[Dict[str, str]]:
         else:
             messages.append(msg)
     return messages
+
+
+def load_conversation(conversation_id: int) -> List[Dict[str, Any]]:
+    # Start with the standard system prompt
+    conversation = [{"role": "system", "content": SYSTEM_PROMPT}]
+    
+    # Retrieve all user & assistant messages, ordered chronologically
+    db_messages = queries.get_conversation_messages(conversation_id)
+    
+    for msg in db_messages:
+        role = msg["role"]
+        
+        if role == "user":
+            conversation.append({"role": "user", "content": msg["content"]})
+            
+        elif role == "assistant":
+            # Fetch any tool calls associated with this assistant message
+            tool_calls = queries.get_tool_calls_for_message(msg["message_id"])
+            
+            if not tool_calls:
+                conversation.append({"role": "assistant", "content": msg["content"]})
+            else:
+                # 1. Reconstruct the tool_calls property for the assistant message
+                tc_list = []
+                tool_msgs = []
+                
+                for tc in tool_calls:
+                    call_id = f"call_{tc['tool_id']}"
+                    
+                    tc_list.append({
+                        "id": call_id,
+                        "type": "function",
+                        "function": {
+                            "name": tc["tool_name"],
+                            "arguments": tc["tool_args"]
+                        }
+                    })
+                    
+                    # 2. Prepare the matching 'tool' role message
+                    tool_msgs.append({
+                        "role": "tool",
+                        "tool_call_id": call_id,
+                        "name": tc["tool_name"],
+                        "content": tc["tool_output"]
+                    })
+                
+                conversation.append({
+                    "role": "assistant",
+                    "content": msg["content"],
+                    "tool_calls": tc_list
+                })
+                conversation.extend(tool_msgs)
+                
+    return conversation
+
+
+def print_conversation_history(conversation: List[Dict[str, Any]]):
+    print(f"\n{INFO_COLOR}=== Resuming Conversation History ==={RESET_COLOR}")
+    
+    i = 0
+    while i < len(conversation):
+        msg = conversation[i]
+        role = msg["role"]
+        
+        if role == "system":
+            i += 1
+            continue
+            
+        if role == "user":
+            print(f"\n{YOU_COLOR}You:{RESET_COLOR} {msg['content']}")
+            i += 1
+            continue
+            
+        if role == "assistant":
+            print(f"\n{ASSISTANT_COLOR}Assistant:{RESET_COLOR}")
+            if msg.get("content"):
+                rprint(Markdown(msg["content"]))
+                
+            tool_calls = msg.get("tool_calls", [])
+            if tool_calls:
+                print(f"{TOOL_COLOR}🔄 Executed {len(tool_calls)} tool{'s' if len(tool_calls) > 1 else ''}...{RESET_COLOR}")
+                for idx, tc in enumerate(tool_calls, 1):
+                    func = tc["function"]
+                    try:
+                        args = json.loads(func["arguments"])
+                        args_display = ", ".join(f"{k}={v}" for k, v in args.items())
+                      # Check if args is a dict/string or something else
+                    except Exception:
+                        args_display = func["arguments"]
+                    print(f"  {idx}. {TOOL_ICON} {func['name']}({args_display})")
+                    
+                    # Find matching tool response to print success/error indicator
+                    for j in range(i + 1, len(conversation)):
+                        candidate = conversation[j]
+                        if candidate["role"] == "tool" and candidate.get("tool_call_id") == tc["id"]:
+                            try:
+                                resp_data = json.loads(candidate["content"])
+                                if isinstance(resp_data, dict) and "error" in resp_data:
+                                    print(f"     {ERROR_ICON} {ERROR_COLOR}Error: {resp_data['error']}{RESET_COLOR}")
+                                else:
+                                    print(f"     {SUCCESS_ICON} {SUCCESS_COLOR}Success{RESET_COLOR}")
+                            except Exception:
+                                print(f"     {SUCCESS_ICON} {SUCCESS_COLOR}Success{RESET_COLOR}")
+                            break
+            i += 1
+            continue
+            
+        if role == "tool":
+            # Tool responses are inline under the assistant message, so we skip them here
+            i += 1
+            continue
+            
+    print(f"\n{INFO_COLOR}======================================{RESET_COLOR}\n")
 
 
 def print_error(context: str, message: str) -> None:
@@ -225,55 +339,7 @@ def handle_assistant_message(assistant_message, conversation: List[Dict[str, Any
     for index, tool_call in enumerate(tool_calls, 1):
         run_tool_call(tool_call, conversation, index, db_msg_id)
 
-def load_conversation(conversation_id:int) -> List[Dict[str,Any]] | None:
-    conversation = [{"role":"system","content":SYSTEM_PROMPT}]
-    
-    db_messages = queries.get_conversation_messages(conversation_id)
 
-    for message in db_messages:
-        role = message["role"]
-
-        if role == "user":
-            conversation.append({"role":"user","content":message["content"]})
-        
-        elif role == "assistant":
-            # fetch any tool_calls associated with this assistant message
-            tool_calls = queries.get_tool_calls_for_message(message["message_id"])
-
-            if not tool_calls:
-                conversation.append({"role":"assistant","content":message["content"]})
-
-            else:
-                # 1. Reconstruct the tool_calls property for the assistant message
-                tc_list = []
-                tool_mssgs = []
-
-                for tc in tool_calls:
-                    call_id = f"call_{tc['tool_id']}"
-
-                    tc_list.append({
-                        "id": call_id,
-                        "type": "function",
-                        "function": {
-                            "name": tc["tool_name"],
-                            "arguments": tc["tool_args"]
-                        }
-                    })
-                    # 2. Prepare the matching 'tool' role message
-                    tool_mssgs.append({
-                        "role":"tool",
-                        "tool_call_id": call_id,
-                        "name":tc["tool_name"],
-                        "content":tc["tool_output"]
-                    })
-                conversation.append({
-                    "role":"assistant",
-                    "content":message["content"],
-                    "tool_calls":tc_list
-                })
-                conversation.extend(tool_mssgs)
-    
-    return conversation
 
 def generate_conversation_summary(conversation: List[Dict[str,Any]],model:str,api_key:str) -> str:
     '''Generate a summary from the completed conversation.'''
@@ -305,19 +371,32 @@ def generate_conversation_summary(conversation: List[Dict[str,Any]],model:str,ap
         return "Summary could not be generated."
 
 
-def agent_loop(model: str, api_key: str,max_iterations:int = 15):
+def agent_loop(model: str, api_key: str, max_iterations: int = 15, resume_id: int = None):
     print(
         f"{SUCCESS_COLOR}{SUCCESS_ICON} Spinning up agent...{RESET_COLOR}"
     )
     print(f"{INFO_COLOR}Type 'exit' or press Ctrl+C to quit.{RESET_COLOR}\n")
 
-    conversation = [{"role": "system", "content": SYSTEM_PROMPT}]
-    
+    if resume_id is not None:
+        conv = queries.get_conversation(resume_id)
+        if not conv:
+            print_error("Resume Error", f"Conversation with ID {resume_id} not found. Starting a new session instead.")
+            conversation = [{"role": "system", "content": SYSTEM_PROMPT}]
+            conv_row_id = queries.start_conversation(model)
+            session_total_tokens = 0
+        else:
+            print(f"{INFO_COLOR}Resuming conversation #{resume_id} ({conv['model']})...{RESET_COLOR}")
+            queries.resume_conversation(resume_id)
+            conversation = load_conversation(resume_id)
+            print_conversation_history(conversation)
+            conv_row_id = resume_id
+            session_total_tokens = conv["total_tokens"] or 0
+    else:
+        conversation = [{"role": "system", "content": SYSTEM_PROMPT}]
+        conv_row_id = queries.start_conversation(model)
+        session_total_tokens = 0
+
     show_ttft = True
-
-    conv_row_id = queries.start_conversation(model)
-
-    session_total_tokens = 0
 
     while True:
         try:
