@@ -213,13 +213,14 @@ def llm_completions(conversation: List[Dict[str, str]], model: str, api_key: str
                             ttft = start_time - request_time
                         delta = chunk.choices[0].delta
                         if delta.content:
-                            # we can roughly model each chunk as its own token
-                            text_token_count += 1
                             accumulated_text += delta.content
                             live.update(Markdown(accumulated_text))
                         chunks.append(chunk)
 
                 end_time = time.perf_counter()
+
+                # Estimate token count based on English characters: 1 character ≈ 0.3 token
+                text_token_count = int(len(accumulated_text) * 0.3)
 
                 full_response = litellm.stream_chunk_builder(chunks)
 

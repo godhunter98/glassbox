@@ -6,7 +6,6 @@ import types
 # Ensure PYTHONPATH references are correctly mocked if modules have dependencies
 from agent.storage import queries
 from agent import coding_agent
-from agent import main
 
 class TestResumeFeature(unittest.TestCase):
     
@@ -68,12 +67,14 @@ class TestResumeFeature(unittest.TestCase):
             }
         ]
         
+        from agent import main
         ids = main.display_sessions_dashboard(all_sessions=False)
         self.assertEqual(ids, [1])
 
     @mock.patch("agent.main.agent_loop")
     @mock.patch("agent.main.display_sessions_dashboard")
     def test_main_routing_resume_arg(self, mock_dashboard, mock_agent_loop):
+        from agent import main
         with mock.patch("sys.argv", ["main.py", "-r", "42"]):
             main.main()
             mock_agent_loop.assert_called_once_with(mock.ANY, mock.ANY, 10, resume_id=42)
@@ -81,6 +82,7 @@ class TestResumeFeature(unittest.TestCase):
     @mock.patch("agent.main.agent_loop")
     @mock.patch("agent.main.display_sessions_dashboard")
     def test_main_routing_new_arg(self, mock_dashboard, mock_agent_loop):
+        from agent import main
         with mock.patch("sys.argv", ["main.py", "-n"]):
             main.main()
             mock_agent_loop.assert_called_once_with(mock.ANY, mock.ANY, 10, resume_id=None)
@@ -90,6 +92,7 @@ class TestResumeFeature(unittest.TestCase):
     def test_main_routing_interactive_resume(self, mock_dashboard, mock_agent_loop):
         mock_dashboard.return_value = [10, 20]
         
+        from agent import main
         # User inputs 20 to resume
         with mock.patch("sys.argv", ["main.py"]), mock.patch("builtins.input", return_value="20"):
             main.main()
@@ -100,6 +103,7 @@ class TestResumeFeature(unittest.TestCase):
     def test_main_routing_interactive_new(self, mock_dashboard, mock_agent_loop):
         mock_dashboard.return_value = [10, 20]
         
+        from agent import main
         # User hits enter to start a new session
         with mock.patch("sys.argv", ["main.py"]), mock.patch("builtins.input", return_value=""):
             main.main()
