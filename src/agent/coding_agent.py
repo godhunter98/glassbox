@@ -27,6 +27,7 @@ from agent.ui import (
     SUCCESS_ICON,
     ERROR_ICON,
 )
+from agent.context_manager import truncate_tool_output
 
 # Disable pydantic warnings
 warnings.filterwarnings("ignore", category=UserWarning, module="pydantic")
@@ -95,7 +96,7 @@ def load_conversation(conversation_id: int) -> List[Dict[str, Any]]:
                         "role": "tool",
                         "tool_call_id": call_id,
                         "name": tc["tool_name"],
-                        "content": tc["tool_output"]
+                        "content": truncate_tool_output(tc["tool_output"])
                     })
                 
                 conversation.append({
@@ -286,6 +287,7 @@ def run_tool_call(
             resp = tool(**tool_args)
             # tool args and tool resp are dicts, but sqlite needs a string, we dump them!
             queries.add_tool_call(db_msg_id,tool_name,json.dumps(tool_args),json.dumps(resp))
+            resp_str = truncate_tool_output(json.dumps(resp))
             conversation.append(
                 {
                     "role": "tool",
