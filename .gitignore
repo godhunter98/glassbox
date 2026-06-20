@@ -21,6 +21,7 @@ docs/
 bug_fixes_summary.txt
 test.py
 responses.txt
+/test*
 
 # test files 
 play.py

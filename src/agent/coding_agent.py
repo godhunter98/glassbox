@@ -185,7 +185,7 @@ def llm_completions(conversation: List[Dict[str, str]], model: str, api_key: str
             "model": model,
             "api_key": api_key,
             "messages": messages,
-            "max_tokens": 2000,
+            "max_tokens": 20_000,
             "temperature": 0.1,
             "tools": get_tool_schema(model),
             "stream":True,
