@@ -1,3 +1,4 @@
+import json
 import os
 import warnings
 import time
@@ -429,6 +430,61 @@ def generate_conversation_summary(conversation: List[Dict[str,Any]],model:str,ap
         print(f"Error generating summary: {e}")
         return "Summary could not be generated."
 
+def refresh_session_state(conversation:List[Dict],model:str,api_key:str,session_state:Session_state):
+    instruction = [
+        {
+            "role": "system",
+            "content": (
+                '''You're a specialised agent who's job is to look at the conversation between a user
+                and an agent and generate structured JSON in the below format.
+                {"goal":"...",
+                "next_steps":[],
+                "decisions":[]
+                }
+                The conversation may contain tool calls and their results or past session state objects as well, 
+                your job is to absorb everything and generate the above mentioned dict with 3 items.
+                '''
+            ),
+        },
+    ]
+    messages = instruction + [{
+    "role":msg["role"], "content":msg["content"]}
+    for msg in conversation
+    if msg["role"] in ("user","assistant") and msg.get("content")
+    ]
+    kwargs = {
+        "model": model,
+        "api_key": api_key,
+        "messages": messages,
+        "max_tokens": 2_000,
+        "temperature": 0.2,
+        "stream": False,
+        "response_format":{"type": "json_object"} ,
+        "thinking": {"type": "disabled"}
+    }
+
+    
+    try:
+        response = litellm.completion(**kwargs)
+        content = response.choices[0].message.content
+        if not content:                       # DeepSeek empty-content case
+            return "State refresh skipped: empty response"
+        
+        try:
+            state_dict = json.loads(content)
+        except json.JSONDecodeError:
+            return "State refresh skipped: bad JSON"
+
+        session_state.refresh_reasoning(
+                goal=state_dict.get("goal", session_state.goal),
+                decisions=state_dict.get("decisions", []),
+                next_steps=state_dict.get("next_steps", []),
+            )
+        return content.strip()
+
+    except Exception as e:
+        print(f"Error creating state object: {e}")
+        return "State object could not be created."
 
 def agent_loop(model: str, api_key: str, max_iterations: int = 15, resume_id: int = None):
     print(
@@ -511,6 +567,7 @@ def agent_loop(model: str, api_key: str, max_iterations: int = 15, resume_id: in
                             break
                         
                         if prompt_tokens is not None and prompt_tokens - last_inject_tokens >= STATE_INJECT_GROWTH:
+                            refresh_session_state(conversation,model,api_key,session_state)
                             conversation.append({"role":"user","content":session_state.render()})
                             last_inject_tokens = prompt_tokens
 
