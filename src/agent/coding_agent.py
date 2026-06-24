@@ -436,7 +436,12 @@ def generate_conversation_summary(conversation: List[Dict[str,Any]],model:str,ap
         print(f"Error generating summary: {e}")
         return "Summary could not be generated."
 
-def refresh_session_state(conversation:List[Dict],model:str,api_key:str,session_state:Session_state):
+def refresh_session_state(
+    conversation: List[Dict],
+    model: str,
+    api_key: str,
+    session_state: Session_state,
+) -> bool:
     instruction = [
         {
             "role": "system",
@@ -474,23 +479,23 @@ def refresh_session_state(conversation:List[Dict],model:str,api_key:str,session_
         response = litellm.completion(**kwargs)
         content = response.choices[0].message.content
         if not content:                       # DeepSeek empty-content case
-            return "State refresh skipped: empty response"
+            return False
         
         try:
             state_dict = json.loads(content)
         except json.JSONDecodeError:
-            return "State refresh skipped: bad JSON"
+            return False
 
         session_state.refresh_reasoning(
                 goal=state_dict.get("goal", session_state.goal),
                 decisions=state_dict.get("decisions", []),
                 next_steps=state_dict.get("next_steps", []),
             )
-        return content.strip()
+        return True
 
     except Exception as e:
         print(f"Error creating state object: {e}")
-        return "State object could not be created."
+        return False
 
 def agent_loop(model: str, api_key: str, max_iterations: int = 15, resume_id: int = None):
     print(
@@ -571,12 +576,18 @@ def agent_loop(model: str, api_key: str, max_iterations: int = 15, resume_id: in
                         
                         if not assistant_message.tool_calls:
                             if prompt_tokens is not None and prompt_tokens - last_state_refresh_tokens >= STATE_INJECT_GROWTH:
-                                refresh_session_state(conversation,model,api_key,session_state)
-                                conversation.append({
-                                    "role": "system",
-                                    "content": f"Internal session state summary:\n{session_state.render()}",
-                                })
-                                last_state_refresh_tokens = prompt_tokens
+                                refreshed = refresh_session_state(
+                                    conversation,
+                                    model,
+                                    api_key,
+                                    session_state,
+                                )
+                                if refreshed:
+                                    conversation.append({
+                                        "role": "system",
+                                        "content": f"Internal session state summary:\n{session_state.render()}",
+                                    })
+                                    last_state_refresh_tokens = prompt_tokens
                             break
                         
                         if prompt_tokens is not None and prompt_tokens > CONTEXT_LIMIT:

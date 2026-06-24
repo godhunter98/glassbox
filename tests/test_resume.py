@@ -2,12 +2,56 @@ import unittest
 from unittest import mock
 import sys
 import types
+from types import SimpleNamespace
 
 # Ensure PYTHONPATH references are correctly mocked if modules have dependencies
 from agent.storage import queries
 from agent import coding_agent
+from agent.context_manager import Session_state
 
 class TestResumeFeature(unittest.TestCase):
+
+    @mock.patch("agent.coding_agent.litellm.completion")
+    def test_refresh_session_state_returns_false_for_empty_response(self, mock_completion):
+        mock_completion.return_value = SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content=""))]
+        )
+        state = Session_state(goal="Existing goal")
+
+        refreshed = coding_agent.refresh_session_state(
+            [{"role": "user", "content": "Continue the task"}],
+            "test-model",
+            "test-key",
+            state,
+        )
+
+        self.assertIs(refreshed, False)
+        self.assertEqual(state.goal, "Existing goal")
+
+    @mock.patch("agent.coding_agent.litellm.completion")
+    def test_refresh_session_state_returns_true_after_update(self, mock_completion):
+        mock_completion.return_value = SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(
+                        content='{"goal":"Updated goal","decisions":["Use SQLite"],"next_steps":["Add tests"]}'
+                    )
+                )
+            ]
+        )
+        state = Session_state()
+
+        refreshed = coding_agent.refresh_session_state(
+            [{"role": "user", "content": "Continue the task"}],
+            "test-model",
+            "test-key",
+            state,
+        )
+
+        self.assertIs(refreshed, True)
+        self.assertEqual(state.goal, "Updated goal")
+        self.assertEqual(state.decisions, ["Use SQLite"])
+        self.assertEqual(state.next_steps, ["Add tests"])
     
     @mock.patch("agent.coding_agent.queries")
     def test_load_conversation_reconstruction(self, mock_queries):
