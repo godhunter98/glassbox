@@ -28,7 +28,7 @@ from agent.ui import (
     SUCCESS_ICON,
     ERROR_ICON,
 )
-from agent.context_manager import truncate_tool_output, mask_old_observations, Session_state
+from agent.context_manager import truncate_tool_output, mask_old_observations, Session_state , prune_conversation
 
 DEEPSEEK_MAX_CONTEXT = 1_000_000
 EXPECTED_MAX_OUTPUT  = 384_000
@@ -39,6 +39,7 @@ STATE_INJECT_GROWTH = 3_000   # re-inject after this much prompt-token growth; t
 # Temp variables to test functionality
 CONTEXT_LIMIT = 6_000
 STATE_INJECT_GROWTH = 3_000
+HARD_LIMIT = 1.2 * CONTEXT_LIMIT
 
 # Disable pydantic warnings
 warnings.filterwarnings("ignore", category=UserWarning, module="pydantic")
@@ -237,7 +238,21 @@ def llm_completions(conversation: List[Dict[str, str]], model: str, api_key: str
                 total_tokens = getattr(usage, "total_tokens", None)
 
                 if prompt_tokens is not None:
-                    print(f"{INFO_COLOR}  [ {prompt_tokens} toks / {DEEPSEEK_MAX_CONTEXT} ]{RESET_COLOR}")
+                    pct = prompt_tokens / DEEPSEEK_MAX_CONTEXT
+                    bar_width = 30
+                    filled = int(bar_width * pct)
+                    empty = bar_width - filled
+                    
+                    # Color based on thresholds: green → yellow → red
+                    if prompt_tokens > HARD_LIMIT:
+                        bar_color = "\u001b[91m"   # Red
+                    elif prompt_tokens > CONTEXT_LIMIT:
+                        bar_color = "\u001b[93m"   # Yellow
+                    else:
+                        bar_color = "\u001b[92m"   # Green
+                    
+                    bar = f"{bar_color}{'█' * filled}{'░' * empty}{RESET_COLOR}"
+                    print(f"  Context: [{bar}] {prompt_tokens:,} / {DEEPSEEK_MAX_CONTEXT:,} ({pct:.1%})")
 
                 if start_time is not None and completion_tokens and completion_tokens > 0:
                     duration = end_time - start_time
@@ -590,9 +605,28 @@ def agent_loop(model: str, api_key: str, max_iterations: int = 15, resume_id: in
                                     last_state_refresh_tokens = prompt_tokens
                             break
                         
+                        # Follow a laddered approach, if masking old observations is not enough, prune
                         if prompt_tokens is not None and prompt_tokens > CONTEXT_LIMIT:
+                            print(f"{INFO_COLOR}  📦 Compacting context (masking old tool outputs)...{RESET_COLOR}")
                             mask_old_observations(conversation, keep_last_n=1)
 
+                        if prompt_tokens is not None and prompt_tokens > HARD_LIMIT:
+                            before_count = len(conversation)
+                            prune_conversation(conversation,10)
+                            print(f"{INFO_COLOR}  ✂️  Pruned conversation: {before_count} → {len(conversation)} messages{RESET_COLOR}")
+                            refreshed = refresh_session_state(
+                                    conversation,
+                                    model,
+                                    api_key,
+                                    session_state,
+                                )
+                            if refreshed:
+                                print(f"{INFO_COLOR}  💉 Injecting session state summary after prune...{RESET_COLOR}")
+                                conversation.append({
+                                    "role": "system",
+                                    "content": f"Internal session state summary:\n{session_state.render()}",
+                                })
+                                last_state_refresh_tokens = prompt_tokens
                         spinner.start()
                         continue                                     
 

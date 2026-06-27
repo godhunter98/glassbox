@@ -194,7 +194,7 @@ def truncate_tool_output(content_str: str, tool_name: str) -> str:
             
     return content_str
 
-def prune_conversation(conversation:List[Dict[str,Any]]):
+def prune_conversation(conversation:List[Dict[str,Any]],preserve_last_n:int=3):
     """Prunes older messages from the conversation history to manage context window constraints.
 
     .. note::
@@ -203,10 +203,28 @@ def prune_conversation(conversation:List[Dict[str,Any]]):
     Args:
         conversation (List[Dict[str, Any]]): The conversation history to be pruned.
     """
-    # needs to be implemented laterr
-    pass
+       
+    groups = []
+    current_group = []
+    for index,exchange in enumerate(conversation):
+        if exchange["role"] == "system" or exchange["role"] == "user":
+            if len(current_group) > 0:
+                groups.append(current_group)     
+            current_group = [index]
+        else:
+            current_group.append(index)
+    if current_group:
+        groups.append(current_group)
 
-
+    if len(groups) > preserve_last_n +2:        
+        kept_conversation = []
+        kept_groups = groups[:2] + groups[-preserve_last_n:]
+        # flattening these lists of lists into kept_conversation via double looping
+        for group in kept_groups:
+            for indice in group:
+                kept_conversation.append(conversation[indice])
+        conversation[:] = kept_conversation
+        return conversation        
 
 if __name__ == "__main__":
     print("--- Running context_manager.py Tests ---")
@@ -265,3 +283,35 @@ if __name__ == "__main__":
     print(f"  run_bash_command output size: {len(long_bash)} -> {len(truncated_bash)}")
     print("  First line of truncated bash:", truncated_bash.splitlines()[0])
     print("  Last line of truncated bash:", truncated_bash.splitlines()[-1])
+
+    # 4. Test prune_conversation
+    print("\n4. Testing prune_conversation:")
+    prune_convo = [
+        {"role": "system", "content": "You are a helpful assistant."},                          # group 0
+        {"role": "user", "content": "Turn 1: Read my config"},                                  # group 1 start
+        {"role": "assistant", "content": "Turn 1: Sure, reading config.", "tool_calls": [{"id": "c1"}]},
+        {"role": "tool", "tool_call_id": "c1", "name": "read_file", "content": "port=8080"},    # group 1 end
+        {"role": "user", "content": "Turn 2: Fix the port"},                                    # group 2 start
+        {"role": "assistant", "content": "Turn 2: Fixed the port."},                             # group 2 end
+        {"role": "user", "content": "Turn 3: Run tests"},                                       # group 3 start
+        {"role": "assistant", "content": "Turn 3: Running tests.", "tool_calls": [{"id": "c2"}]},
+        {"role": "tool", "tool_call_id": "c2", "name": "run_bash_command", "content": "PASS"},   # group 3 end
+        {"role": "system", "content": "Session state: Goal is to fix config"},                   # group 4 (injected state)
+        {"role": "user", "content": "Turn 4: Deploy it"},                                       # group 5 start
+        {"role": "assistant", "content": "Turn 4: Deploying now."},                              # group 5 end
+        {"role": "user", "content": "Turn 5: Check status"},                                    # group 6 start
+        {"role": "assistant", "content": "Turn 5: All good!", "tool_calls": [{"id": "c3"}]},
+        {"role": "tool", "tool_call_id": "c3", "name": "run_bash_command", "content": "200 OK"}, # group 6 end
+        {"role": "user", "content": "Turn 6: Thanks!"},                                         # group 7 start
+        {"role": "assistant", "content": "Turn 6: You're welcome!"},                             # group 7 end
+    ]
+
+    print(f"  Before pruning: {len(prune_convo)} messages")
+    print(f"  Messages: {[m['content'][:30] for m in prune_convo]}")
+    
+    prune_conversation(prune_convo, preserve_last_n=2)
+    
+    print(f"\n  After pruning (preserve_last_n=2): {len(prune_convo)} messages")
+    print(f"  Surviving messages:")
+    for msg in prune_convo:
+        print(f"    [{msg['role']}] {msg['content'][:50]}")

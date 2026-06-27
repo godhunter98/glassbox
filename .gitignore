@@ -26,6 +26,7 @@ responses.txt
 # test files 
 play.py
 decorators.py
+ralph*
 
 # Database
 *.db
