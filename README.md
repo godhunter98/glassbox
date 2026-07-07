@@ -1,6 +1,6 @@
-# Simple Coding Agent
+# GlassBox 🔍
 
-A lightweight CLI coding assistant powered by LLMs via [litellm](https://github.com/BerriAI/litellm).
+A transparent, provider-agnostic CLI coding assistant powered by LLMs via [litellm](https://github.com/BerriAI/litellm).
 
 <img width="2048" height="1332" alt="image" src="https://github.com/user-attachments/assets/01562b90-952e-4d57-83c4-df1218f09999" />
 
@@ -18,7 +18,7 @@ A lightweight CLI coding assistant powered by LLMs via [litellm](https://github.
 
 ```bash
 git clone <repository-url>
-cd simple-coding-agent
+cd glassbox
 uv sync
 ```
 
@@ -59,7 +59,7 @@ Inside a session, type `exit`, `quit`, or press `Ctrl+C` to quit.
 ## Project structure
 
 ```
-simple-coding-agent/
+glassbox/
 ├── src/
 │   └── agent/
 │       ├── main.py              # CLI entrypoint and session selection

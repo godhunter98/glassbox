@@ -12,7 +12,7 @@ api_key = os.getenv("API_KEY", "")
 
 def parse_args():
     import argparse
-    parser = argparse.ArgumentParser(description="Simple Coding Agent CLI")
+    parser = argparse.ArgumentParser(description="GlassBox CLI — transparent coding assistant")
     group = parser.add_mutually_exclusive_group()
     
     group.add_argument("-r", "--resume", type=int, help="Resume conversation by ID")

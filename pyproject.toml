@@ -1,7 +1,7 @@
 [project]
-name = "simple-coding-agent"
+name = "glassbox"
 version = "0.1.0"
-description = "Add your description here"
+description = "GlassBox — a transparent, provider-agnostic CLI coding assistant"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
