@@ -2,7 +2,7 @@
 
 A transparent, provider-agnostic CLI coding assistant powered by LLMs via [litellm](https://github.com/BerriAI/litellm).
 
-<img width="2048" height="1332" alt="image" src="https://github.com/user-attachments/assets/01562b90-952e-4d57-83c4-df1218f09999" />
+![Uploading image.png…]()
 
 
 ## Features
