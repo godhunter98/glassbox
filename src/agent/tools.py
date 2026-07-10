@@ -228,7 +228,7 @@ def get_tool_schema(model: str | None = None) -> list[dict]:
 
 @register_tool
 def read_file(filename: str) -> Dict[str, Any]:
-    """ A simple too to read any kind of files, just provide the filename with its extension"""
+    """ A simple tool to read any kind of files, just provide the filename with its extension"""
     full_path = resolve_abs_path(filename)
     print(f"{TOOL_COLOR}{TOOL_ICON} Reading file: {INFO_COLOR}{filename}{RESET_COLOR}")
     try:

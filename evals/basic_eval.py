@@ -6,6 +6,9 @@ from typing import Literal
 from dotenv import load_dotenv
 import litellm
 from enum import Enum
+from dataclasses import dataclass
+from typing import Callable
+from functools import partial
 
 load_dotenv()
 
@@ -16,16 +19,28 @@ class Verdict(Enum):
     PASS = 1
     FAIL = 2
     UNKNOWN = 3
-    
 
-def check_file_creation(filename:str,file_content:str,match:Literal["contains","exact"]="contains"): 
+@dataclass
+class Result:
+    # our result is what the agent outputs and what the current state looks like - state change
+    agent_output: str
+    workspace: Path
+
+@dataclass
+class Task:
+    # A single task is the written-down pairing: this input, judged by these graders
+    name: str
+    agent_input: str
+    graders: list[Callable[[Result], Verdict]]
+
+
+def check_file_creation(result:Result,filename:str,file_content:str,match:Literal["contains","exact"]="contains") -> Verdict: 
     '''
     After the test run, we're checking for whether the file exists at a specific path and if the contents of the file match what we asked 
     the agent to populate.
     '''
     try:
-        current_location = Path.cwd()
-        file_path = current_location / filename 
+        file_path = result.workspace / filename 
 
         if file_path.exists():
             with file_path.open("r") as file:
@@ -35,39 +50,34 @@ def check_file_creation(filename:str,file_content:str,match:Literal["contains","
                 elif match == "exact" and content.strip() == file_content.strip():
                     return Verdict.PASS
                 else:
-                    Verdict.FAIL
+                    return Verdict.FAIL
         else: 
             return Verdict.FAIL
     except Exception:
         return Verdict.UNKNOWN
 
-def judge_file_content(task:str,actual_content:str,model:str,api_key:str):
+def judge_file_content(result:Result,task:str,model:str,api_key:str) -> Verdict:
     prompt = f"""You are evaluating whether an agent completed a task correctly.
     Task the agent was given: {task}
-    Output the agent produced: {actual_content}
+    Output the agent produced: {result.agent_output}
     Does the output satisfy the task? Respond with exactly one word: PASS, FAIL or UNKNOWN.
     """
     conversation = [{"role":"system","content":"You are a helpful assistant."},{"role":"user","content":prompt}]
     try:
         response = litellm.completion(model=model,api_key=api_key,messages=conversation,temperature=0)
         content: str|None = response.choices[0].message.content
-        result = content.strip().lower()
-
-        if result == "pass":
+        if content is None:
+            return Verdict.UNKNOWN
+        output = content.strip().lower()
+        if output == "pass":
             return Verdict.PASS
-        elif result == "fail":
+        elif output == "fail":
             return Verdict.FAIL
         else:
             return Verdict.UNKNOWN
     except Exception:
         return Verdict.UNKNOWN
 
-
-print(check_file_creation("test.txt","hey there",match="contains"))
-
-print(judge_file_content(
-    task="What is 7x + 27, when x is 2, give only the answer and no greetings, nothing?",
-    actual_content="42",
-    model=model,
-    api_key=api_key,
-))
+# we're using partial to check and freeze some of the inputs to our function
+file_grader = partial(check_file_creation,filename="notes.txt",file_content="Hello world",match="contains")
+content_grader = partial(judge_file_content,task="Create notes.txt containing a greeting",model=model,api_key=api_key)
