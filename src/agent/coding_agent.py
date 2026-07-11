@@ -29,6 +29,9 @@ from agent.ui import (
     ERROR_ICON,
 )
 from agent.context_manager import truncate_tool_output, mask_old_observations, Session_state , prune_conversation
+from contextlib import nullcontext
+import io
+from contextlib import redirect_stdout, redirect_stderr
 
 DEEPSEEK_MAX_CONTEXT = 1_000_000
 EXPECTED_MAX_OUTPUT  = 384_000
@@ -181,7 +184,7 @@ def print_error(context: str, message: str) -> None:
     print(f"{ERROR_COLOR}{ERROR_ICON} {context}: {message}{RESET_COLOR}")
 
 
-def llm_completions(conversation: List[Dict[str, str]], model: str, api_key: str,spinner:Spinner=None,show_ttft=True):
+def llm_completions(conversation: List[Dict[str, str]], model: str, api_key: str,spinner:Spinner=None,show_ttft=True,quiet:bool=False):
     
     messages = build_messages(conversation)
     if model and api_key is not None:
@@ -213,14 +216,19 @@ def llm_completions(conversation: List[Dict[str, str]], model: str, api_key: str
                 if spinner:
                     spinner.stop()
                     spinner = None
-
-                print(f"{ASSISTANT_COLOR}Assistant:{RESET_COLOR}")
+                
+                
+                if not quiet:
+                    print(f"{ASSISTANT_COLOR}Assistant:{RESET_COLOR}")
+                
                 accumulated_text = ""
 
                 last_render_time = 0
                 RENDER_INTERVAL = 1 / 15  # match your refresh rate
 
-                with Live("", refresh_per_second=15, vertical_overflow="visible") as live:
+                live_context = Live("", refresh_per_second=15, vertical_overflow="visible") if not quiet else nullcontext()
+
+                with live_context as live:
                     for chunk in response:
                         if start_time is None:
                             start_time = time.perf_counter()
@@ -230,12 +238,15 @@ def llm_completions(conversation: List[Dict[str, str]], model: str, api_key: str
                             accumulated_text += delta.content
 
                             # increase efficiency by building only relevant chunks
-                            now = time.monotonic()
-                            if now-last_render_time >= RENDER_INTERVAL:
-                                live.update(Markdown(accumulated_text))
-                                last_render_time = now 
+                            if not quiet:
+                                now = time.monotonic()
+                                if now-last_render_time >= RENDER_INTERVAL:
+                                    live.update(Markdown(accumulated_text))
+                                    last_render_time = now 
+                                    
                         chunks.append(chunk)
-                    live.update(Markdown(accumulated_text))
+                    if not quiet:
+                        live.update(Markdown(accumulated_text))
 
                 end_time = time.perf_counter()
 
@@ -260,59 +271,66 @@ def llm_completions(conversation: List[Dict[str, str]], model: str, api_key: str
                         bar_color = "\u001b[92m"   # Green
                     
                     bar = f"{bar_color}{'█' * filled}{'░' * empty}{RESET_COLOR}"
-                    print(f"  Context: [{bar}] {prompt_tokens:,} / {DEEPSEEK_MAX_CONTEXT:,} ({pct:.1%})")
+                    if not quiet:
+                        print(f"  Context: [{bar}] {prompt_tokens:,} / {DEEPSEEK_MAX_CONTEXT:,} ({pct:.1%})")
 
                 if start_time is not None and completion_tokens and completion_tokens > 0:
                     duration = end_time - start_time
                     tps = completion_tokens / duration
-                    if show_ttft:
-                        print(f"{INFO_COLOR}  [ {ttft:.1f}s - 1st token ]{RESET_COLOR}")
-                    if kwargs.get("extra_body", {}).get("thinking") == {"type": "disabled"}:
-                        print(f"{INFO_COLOR}  [ {tps:.1f} toks/s | {completion_tokens} tokens in {duration:.2f}s | Thinking_Mode 🧠: ❌ ]{RESET_COLOR}\n")
-                    else:
-                        print(f"{INFO_COLOR}  [ {tps:.1f} toks/s | {completion_tokens} tokens in {duration:.2f}s | Thinking_Mode 🧠 : ✅ ]{RESET_COLOR}\n")
+                    if not quiet:
+                        if show_ttft:
+                            print(f"{INFO_COLOR}  [ {ttft:.1f}s - 1st token ]{RESET_COLOR}")
+                        if kwargs.get("extra_body", {}).get("thinking") == {"type": "disabled"}:
+                            print(f"{INFO_COLOR}  [ {tps:.1f} toks/s | {completion_tokens} tokens in {duration:.2f}s | Thinking_Mode 🧠: ❌ ]{RESET_COLOR}\n")
+                        else:
+                            print(f"{INFO_COLOR}  [ {tps:.1f} toks/s | {completion_tokens} tokens in {duration:.2f}s | Thinking_Mode 🧠 : ✅ ]{RESET_COLOR}\n")
 
                 return full_response, prompt_tokens, total_tokens
                 
             except Exception as e:
                 last_error = e
                 delay = 2**attempt
-                print(f"Attempt {attempt + 1} failed: {e}, retrying in {delay}s...")
+                if not quiet:
+                    print(f"Attempt {attempt + 1} failed: {e}, retrying in {delay}s...")
                 time.sleep(delay)
 
         error_msg = f"LLM call failed: {str(last_error)}"
-        print_error("LLM error", error_msg)
-        print(
-            f"{INFO_COLOR}Make sure you have set up your API keys in the .env file{RESET_COLOR}"
-        )
-        print(f"{INFO_COLOR}Current model: {model}{RESET_COLOR}")
-        return f"I encountered an error: {error_msg}. Please check your API key configuration.",0
+        if not quiet:
+            print_error("LLM error", error_msg)
+            print(
+                f"{INFO_COLOR}Make sure you have set up your API keys in the .env file{RESET_COLOR}"
+            )
+            print(f"{INFO_COLOR}Current model: {model}{RESET_COLOR}")
+        return f"I encountered an error: {error_msg}. Please check your API key configuration.",None,None
     
     else:
         error_msg = "Missing environment variable: MODEL or API_KEY"
-        print_error("Configuration error", error_msg)
-        print(
-            f"{INFO_COLOR}Please set MODEL and API_KEY in your .env file{RESET_COLOR}"
-        )
-        return f"I encountered an error: {error_msg}. Please check your .env file configuration.",0
+        if not quiet:
+            print_error("Configuration error", error_msg)
+            print(
+                f"{INFO_COLOR}Please set MODEL and API_KEY in your .env file{RESET_COLOR}"
+            )
+        return f"I encountered an error: {error_msg}. Please check your .env file configuration.",None,None
 
 
 def run_tool_call(
-    tool_call, conversation: List[Dict[str, Any]], index: int , db_msg_id: int, session_state:Session_state
+    tool_call, conversation: List[Dict[str, Any]], index: int , db_msg_id: int, session_state:Session_state,quiet:bool=False
 ) -> None:
     tool_name = tool_call.function.name
     try:
         # Tool arguments arrive as JSON strings in the model response.
         tool_args = json.loads(tool_call.function.arguments)
         args_display = ", ".join(f"{k}={v}" for k, v in tool_args.items())
-        print(f"  {index}. {TOOL_ICON} {tool_name}({args_display})")
+        if not quiet:
+            print(f"  {index}. {TOOL_ICON} {tool_name}({args_display})")
 
         tool = tool_registry.get(tool_name)
         
         # error handling if tool doesn't exist
         if not tool:
             error_msg = f"Unknown tool: {tool_name}"
-            print_error("Tool error", error_msg)
+            if not quiet:
+                print_error("Tool error", error_msg)
             conversation.append(
                 {
                     "role": "tool",
@@ -324,8 +342,11 @@ def run_tool_call(
             return
 
         try:
-            resp = tool(**tool_args)
-            
+            if quiet:
+                with redirect_stdout(io.StringIO()),redirect_stderr(io.StringIO()):
+                    resp = tool(**tool_args)
+            else:
+                resp = tool(**tool_args)
             if tool_name in {"read_file","edit_file"}:
                 # Track file touches for file-related tools
                 path = tool_args.get("path") or tool_args.get("filename")
@@ -333,7 +354,8 @@ def run_tool_call(
                     session_state.record_file(path)
                 
             # tool args and tool resp are dicts, but sqlite needs a string, we dump them!
-            queries.add_tool_call(db_msg_id,tool_name,json.dumps(tool_args),json.dumps(resp))
+            if not quiet:
+                queries.add_tool_call(db_msg_id,tool_name,json.dumps(tool_args),json.dumps(resp))
             resp_str = truncate_tool_output(json.dumps(resp),tool_name)
             conversation.append(
                 {
@@ -345,7 +367,8 @@ def run_tool_call(
             )
         except Exception as e:
             error_msg = f"Tool execution failed: {str(e)}"
-            print_error("Tool error", error_msg)
+            if not quiet:
+                print_error("Tool error", error_msg)
             session_state.record_blocker(tool_name,tool_args,error_msg)
             conversation.append(
                 {
@@ -357,15 +380,18 @@ def run_tool_call(
             )
 
     except json.JSONDecodeError:
-        print("The model sent back a broken JSON string!")
+        if not quiet:
+            print("The model sent back a broken JSON string!")
 
-def handle_assistant_message(assistant_message, conversation: List[Dict[str, Any]],conversation_id: int,session_state:Session_state) -> None:
+def handle_assistant_message(assistant_message, conversation: List[Dict[str, Any]],conversation_id: int,session_state:Session_state,quiet:bool = False) -> None:
     content = getattr(assistant_message, "content", "") or ""
     tool_calls = getattr(assistant_message, "tool_calls", None) or []
     # Capture reasoning_content if present (DeepSeek thinking mode)
     reasoning_content = getattr(assistant_message, "reasoning_content", None)
 
-    db_msg_id = queries.add_message(conversation_id,"assistant",content)
+    db_msg_id = None
+    if not quiet:
+        db_msg_id = queries.add_message(conversation_id,"assistant",content)
 
     if not tool_calls:
         msg = ({"role": "assistant", "content": content})
@@ -385,12 +411,13 @@ def handle_assistant_message(assistant_message, conversation: List[Dict[str, Any
         msg["reasoning_content"] = reasoning_content
     conversation.append(msg)
 
-    print(
-        f"{TOOL_COLOR}🔄 Executing {len(tool_calls)} tool{'s' if len(tool_calls) > 1 else ''}...{RESET_COLOR}"
-    )
+    if not quiet:
+        print(
+            f"{TOOL_COLOR}🔄 Executing {len(tool_calls)} tool{'s' if len(tool_calls) > 1 else ''}...{RESET_COLOR}"
+        )
 
     for index, tool_call in enumerate(tool_calls, 1):
-        run_tool_call(tool_call, conversation, index, db_msg_id, session_state)
+        run_tool_call(tool_call, conversation, index, db_msg_id, session_state, quiet)
 
 
 
@@ -521,11 +548,15 @@ def refresh_session_state(
         print(f"Error creating state object: {e}")
         return False
 
-def agent_loop(model: str, api_key: str, max_iterations: int = 15, resume_id: int = None):
-    print(
-        f"{SUCCESS_COLOR}{SUCCESS_ICON} Spinning up agent...{RESET_COLOR}"
-    )
-    print(f"{INFO_COLOR}Type 'exit' or press Ctrl+C to quit.{RESET_COLOR}\n")
+def agent_loop(model: str, api_key: str, max_iterations: int = 15, resume_id: int = None, evalmode:bool = False, agent_input:str | None = None):
+    
+    quiet = evalmode
+
+    if not evalmode:
+        print(
+            f"{SUCCESS_COLOR}{SUCCESS_ICON} Spinning up agent...{RESET_COLOR}"
+        )
+        print(f"{INFO_COLOR}Type 'exit' or press Ctrl+C to quit.{RESET_COLOR}\n")
 
     if resume_id is not None:
         conv = queries.get_conversation(resume_id)
@@ -545,7 +576,9 @@ def agent_loop(model: str, api_key: str, max_iterations: int = 15, resume_id: in
             session_total_tokens = conv["total_tokens"] or 0
     else:
         conversation = [{"role": "system", "content": SYSTEM_PROMPT}]
-        conv_row_id = queries.start_conversation(model)
+        conv_row_id = None
+        if not evalmode:
+            conv_row_id = queries.start_conversation(model)
         session_total_tokens = 0
         session_state = Session_state()
 
@@ -553,53 +586,64 @@ def agent_loop(model: str, api_key: str, max_iterations: int = 15, resume_id: in
     last_state_refresh_tokens = 0
 
     try:
-        while True:
-            try:
-                user_input = input(f"\n{YOU_COLOR}You:{RESET_COLOR} ")
-            except (KeyboardInterrupt, EOFError):
-                print()
-                break
+        while True:   
+            if not evalmode:
+                try:
+                    user_input = input(f"\n{YOU_COLOR}You:{RESET_COLOR} ")
+                except (KeyboardInterrupt, EOFError):
+                    print()
+                    break
 
-            if not user_input.strip():
-                continue
+                if not user_input.strip():
+                    continue
 
-            if user_input.lower() in ["exit", "quit"]:
-                break
+                if user_input.lower() in ["exit", "quit"]:
+                    break
+            
+            else:
+                user_input = agent_input
 
-            conversation.append({"role": "user", "content": user_input.strip()})
+            conversation.append({"role": "user", "content": user_input.strip() if user_input is not None else ""})
 
-            queries.add_message(conversation_id=conv_row_id,role="user",content=user_input.strip())
+            if not evalmode:
+                queries.add_message(conversation_id=conv_row_id,role="user",content=user_input.strip()if user_input is not None else "")
 
-            spinner = Spinner()
-            spinner.start()
+            spinner = Spinner() if not evalmode else None
+            spinner.start() if spinner else None
 
             current_iteration = 0
 
             while current_iteration<=max_iterations:
                 current_iteration+=1
 
-                response, prompt_tokens, total_tokens = llm_completions(conversation, model, api_key,spinner=spinner,show_ttft=show_ttft)
+                response, prompt_tokens, total_tokens = llm_completions(conversation, model, api_key,spinner=spinner,show_ttft=show_ttft,quiet=quiet)
                 
-                if total_tokens is not None:
+                if total_tokens is not None and not evalmode:
                     session_total_tokens += total_tokens
                     queries.update_conversation_stats(conv_row_id, session_total_tokens)
 
                 show_ttft=False
 
+                # if the assistant has a final answer ready, we break out, seeking the next user message
                 if isinstance(response, str):
-                    print(f"{ASSISTANT_COLOR}Assistant:{RESET_COLOR} {response}")
-                    break
+                    if not evalmode:
+                        print(f"{ASSISTANT_COLOR}Assistant:{RESET_COLOR} {response}")
+                        break
+                    elif evalmode:
+                        return response
 
-                # to understand what is going on here, go and read the liteLLM response json format.
+                # If the assistant produced a final answer, the user turn is complete.
+                # If it produced tool calls, handle_assistant_message appended tool results,
+                # so continue the loop and ask the model to respond using those results.
                 try:
                     if hasattr(response, "choices") and response.choices:  # type: ignore
                         # Only the first choice is used for this CLI loop.
                         assistant_message = response.choices[0].message  # type: ignore
                         # The response is being generated by the assistant, depending on whether there are tool calls or not.
-                        handle_assistant_message(assistant_message, conversation, conv_row_id, session_state)
+                        handle_assistant_message(assistant_message, conversation, conv_row_id, session_state, quiet)
                         
                         if not assistant_message.tool_calls:
-                            if prompt_tokens is not None and prompt_tokens - last_state_refresh_tokens >= STATE_INJECT_GROWTH:
+                            if prompt_tokens is not None and prompt_tokens - last_state_refresh_tokens >= STATE_INJECT_GROWTH and not evalmode:
                                 refreshed = refresh_session_state(
                                     conversation,
                                     model,
@@ -612,14 +656,17 @@ def agent_loop(model: str, api_key: str, max_iterations: int = 15, resume_id: in
                                         "content": f"Internal session state summary:\n{session_state.render()}",
                                     })
                                     last_state_refresh_tokens = prompt_tokens
-                            break
-                        
+                            if evalmode:
+                                return assistant_message.content or ""
+                            break 
+                                                 
+
                         # Follow a laddered approach, if masking old observations is not enough, prune
-                        if prompt_tokens is not None and prompt_tokens > CONTEXT_LIMIT:
+                        if prompt_tokens is not None and prompt_tokens > CONTEXT_LIMIT and not evalmode:
                             print(f"{INFO_COLOR}  📦 Compacting context (masking old tool outputs)...{RESET_COLOR}")
                             mask_old_observations(conversation, keep_last_n=1)
 
-                        if prompt_tokens is not None and prompt_tokens > HARD_LIMIT:
+                        if prompt_tokens is not None and prompt_tokens > HARD_LIMIT and not evalmode:
                             before_count = len(conversation)
                             prune_conversation(conversation,10)
                             print(f"{INFO_COLOR}  ✂️  Pruned conversation: {before_count} → {len(conversation)} messages{RESET_COLOR}")
@@ -636,37 +683,45 @@ def agent_loop(model: str, api_key: str, max_iterations: int = 15, resume_id: in
                                     "content": f"Internal session state summary:\n{session_state.render()}",
                                 })
                                 last_state_refresh_tokens = prompt_tokens
-                        spinner.start()
+                        spinner.start() if spinner else None
                         continue                                     
 
                     else:
                         # Fallback for unexpected response format
                         content = str(response)
-                        print(f"{ASSISTANT_COLOR}Assistant:{RESET_COLOR} {content}")
+                        if not evalmode:
+                            print(f"{ASSISTANT_COLOR}Assistant:{RESET_COLOR} {content}")
                         conversation.append({"role": "assistant", "content": content})
+                        if evalmode:
+                            return content
                         break
-
+                
                 except Exception as e:
-                    print(
-                        f"{ERROR_COLOR}{ERROR_ICON} Error processing response: {e}{RESET_COLOR}"
-                    )
-                    print(
-                        f"{ASSISTANT_COLOR}Assistant:{RESET_COLOR} I encountered an error processing the response."
-                    )
+                    if not evalmode:
+                        print(
+                            f"{ERROR_COLOR}{ERROR_ICON} Error processing response: {e}{RESET_COLOR}"
+                        )
+                        print(
+                            f"{ASSISTANT_COLOR}Assistant:{RESET_COLOR} I encountered an error processing the response."
+                        )
                     break
-
+            if evalmode:
+                return ""
+            
     except KeyboardInterrupt:
         print()
-
-    # Always generate summary and mark completed on exit
-    try:
-        conv_summary = generate_conversation_summary(conversation, model, api_key)
-    except (KeyboardInterrupt, Exception) as e:
-        print(f"\n{INFO_COLOR}Summary skipped ({type(e).__name__}){RESET_COLOR}")
-        conv_summary = "Untitled session"
     
-    queries.mark_conversation_completed(conv_row_id, conv_summary)
-    print(f"\n{INFO_COLOR}Goodbye! 👋{RESET_COLOR}")
+    # Always generate summary and mark completed on exit
+    if not evalmode:
+        try:
+            conv_summary = generate_conversation_summary(conversation, model, api_key)
+        except (KeyboardInterrupt, Exception) as e:
+            print(f"\n{INFO_COLOR}Summary skipped ({type(e).__name__}){RESET_COLOR}")
+            conv_summary = "Untitled session"
+        
+
+        queries.mark_conversation_completed(conv_row_id, conv_summary)
+        print(f"\n{INFO_COLOR}Goodbye! 👋{RESET_COLOR}")
 
 
 if __name__ == "__main__":

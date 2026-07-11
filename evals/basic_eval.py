@@ -45,7 +45,7 @@ def check_file_creation(result:Result,filename:str,file_content:str,match:Litera
         if file_path.exists():
             with file_path.open("r") as file:
                 content = file.read()
-                if match == "contains"and  file_content.strip() in content.strip():
+                if match == "contains" and file_content.strip() in content.strip():
                     return Verdict.PASS
                 elif match == "exact" and content.strip() == file_content.strip():
                     return Verdict.PASS
