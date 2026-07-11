@@ -50,11 +50,8 @@ logging.getLogger("litellm").setLevel(logging.WARNING)
 os.environ["LITELLM_LOG"] = "ERROR"
 
 
-llm_config = {}
-
-
-if os.environ.get("API_BASE"):
-    llm_config["api_base"] = os.environ["API_BASE"]
+def get_api_base() -> str | None:
+    return os.environ.get("API_BASE") or None
 
 
 def build_messages(conversation: List[Dict[str, str]]) -> List[Dict[str, str]]:
@@ -200,8 +197,9 @@ def llm_completions(conversation: List[Dict[str, str]], model: str, api_key: str
         }
 
         # Allow overriding the LLM base URL without changing call sites.
-        if llm_config.get("api_base"):
-            kwargs["api_base"] = llm_config["api_base"]
+        api_base = get_api_base()
+        if api_base:
+            kwargs["api_base"] = api_base
             
         for attempt in range(3):
             try:
@@ -447,8 +445,9 @@ def generate_conversation_summary(conversation: List[Dict[str,Any]],model:str,ap
         "extra_body":{"thinking": {"type": "disabled"}}
     }
 
-    if llm_config.get("api_base"):
-        kwargs["api_base"] = llm_config["api_base"]
+    api_base = get_api_base()
+    if api_base:
+        kwargs["api_base"] = api_base
 
     try:
         for attempt in range(2):

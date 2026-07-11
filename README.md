@@ -28,10 +28,12 @@ Or with pip: `pip install -e .`
 Create a `.env` file:
 
 ```env
-MODEL="deepseek/deepseek-coder"
+MODEL="deepseek/deepseek-v4-flash"
 API_KEY="your-api-key-here"
 API_BASE="http://localhost:8000/v1"  # optional, for local models
 ```
+
+If `MODEL` or `API_KEY` is missing, GlassBox will prompt you to set them up on first run.
 
 Any model supported by litellm works.
 

@@ -116,24 +116,27 @@ class TestResumeFeature(unittest.TestCase):
         self.assertEqual(ids, [1])
 
     @mock.patch("agent.main.agent_loop")
+    @mock.patch("agent.main.ensure_config", return_value=("test-model", "test-key"))
     @mock.patch("agent.main.display_sessions_dashboard")
-    def test_main_routing_resume_arg(self, mock_dashboard, mock_agent_loop):
+    def test_main_routing_resume_arg(self, mock_dashboard, mock_ensure_config, mock_agent_loop):
         from agent import main
         with mock.patch("sys.argv", ["main.py", "-r", "42"]):
             main.main()
             mock_agent_loop.assert_called_once_with(mock.ANY, mock.ANY, 10, resume_id=42)
 
     @mock.patch("agent.main.agent_loop")
+    @mock.patch("agent.main.ensure_config", return_value=("test-model", "test-key"))
     @mock.patch("agent.main.display_sessions_dashboard")
-    def test_main_routing_new_arg(self, mock_dashboard, mock_agent_loop):
+    def test_main_routing_new_arg(self, mock_dashboard, mock_ensure_config, mock_agent_loop):
         from agent import main
         with mock.patch("sys.argv", ["main.py", "-n"]):
             main.main()
             mock_agent_loop.assert_called_once_with(mock.ANY, mock.ANY, 10, resume_id=None)
 
     @mock.patch("agent.main.agent_loop")
+    @mock.patch("agent.main.ensure_config", return_value=("test-model", "test-key"))
     @mock.patch("agent.main.display_sessions_dashboard")
-    def test_main_routing_interactive_resume(self, mock_dashboard, mock_agent_loop):
+    def test_main_routing_interactive_resume(self, mock_dashboard, mock_ensure_config, mock_agent_loop):
         mock_dashboard.return_value = [10, 20]
         
         from agent import main
@@ -143,8 +146,9 @@ class TestResumeFeature(unittest.TestCase):
             mock_agent_loop.assert_called_once_with(mock.ANY, mock.ANY, 10, resume_id=20)
 
     @mock.patch("agent.main.agent_loop")
+    @mock.patch("agent.main.ensure_config", return_value=("test-model", "test-key"))
     @mock.patch("agent.main.display_sessions_dashboard")
-    def test_main_routing_interactive_new(self, mock_dashboard, mock_agent_loop):
+    def test_main_routing_interactive_new(self, mock_dashboard, mock_ensure_config, mock_agent_loop):
         mock_dashboard.return_value = [10, 20]
         
         from agent import main
