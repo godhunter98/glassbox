@@ -285,7 +285,7 @@ def llm_completions(conversation: List[Dict[str, str]], model: str, api_key: str
                         else:
                             print(f"{INFO_COLOR}  [ {tps:.1f} toks/s | {completion_tokens} tokens in {duration:.2f}s | Thinking_Mode 🧠 : ✅ ]{RESET_COLOR}\n")
 
-                return full_response, prompt_tokens, total_tokens
+                return full_response, prompt_tokens, total_tokens, completion_tokens
                 
             except Exception as e:
                 last_error = e
@@ -301,7 +301,7 @@ def llm_completions(conversation: List[Dict[str, str]], model: str, api_key: str
                 f"{INFO_COLOR}Make sure you have set up your API keys in the .env file{RESET_COLOR}"
             )
             print(f"{INFO_COLOR}Current model: {model}{RESET_COLOR}")
-        return f"I encountered an error: {error_msg}. Please check your API key configuration.",None,None
+        return f"I encountered an error: {error_msg}. Please check your API key configuration.", None, None, None
     
     else:
         error_msg = "Missing environment variable: MODEL or API_KEY"
@@ -310,7 +310,7 @@ def llm_completions(conversation: List[Dict[str, str]], model: str, api_key: str
             print(
                 f"{INFO_COLOR}Please set MODEL and API_KEY in your .env file{RESET_COLOR}"
             )
-        return f"I encountered an error: {error_msg}. Please check your .env file configuration.",None,None
+        return f"I encountered an error: {error_msg}. Please check your .env file configuration.", None, None, None
 
 
 def run_tool_call(
@@ -616,7 +616,7 @@ def agent_loop(model: str, api_key: str, max_iterations: int = 15, resume_id: in
             while current_iteration<=max_iterations:
                 current_iteration+=1
 
-                response, prompt_tokens, total_tokens = llm_completions(conversation, model, api_key,spinner=spinner,show_ttft=show_ttft,quiet=quiet)
+                response, prompt_tokens, total_tokens,completion_tokens = llm_completions(conversation, model, api_key,spinner=spinner,show_ttft=show_ttft,quiet=quiet)
                 
                 if total_tokens is not None and not evalmode:
                     session_total_tokens += total_tokens
@@ -625,7 +625,7 @@ def agent_loop(model: str, api_key: str, max_iterations: int = 15, resume_id: in
                         conv_row_id,
                         total_tokens=session_total_tokens,
                         input_tokens=prompt_tokens,
-                        output_tokens=max(0, total_tokens - (prompt_tokens or 0)),
+                        output_tokens=completion_tokens,
                         cache_hit_tokens=getattr(usage, "prompt_cache_hit_tokens", 0) or 0,
                         cache_miss_tokens=getattr(usage, "prompt_cache_miss_tokens", None),
                     )

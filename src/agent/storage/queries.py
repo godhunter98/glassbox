@@ -42,7 +42,7 @@ def start_conversation(model:str) -> int | None:
         return cursor.lastrowid
 
 def update_conversation_stats(
-    conversation_id: int,
+    conversation_id: int | None,
     total_tokens: int = 0,
     *,
     input_tokens: int | None = None,
@@ -90,7 +90,7 @@ def update_conversation_stats(
         )
 
 
-def add_message(conversation_id:int, role:str, content:str) -> int | None:
+def add_message(conversation_id:int | None, role:str, content:str) -> int | None:
     """
     Add message to a converation
     """
