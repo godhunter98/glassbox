@@ -2,6 +2,7 @@ import pathlib
 import sqlite3
 from contextlib import contextmanager
 from .db import init_db,DB_PATH
+from agent.pricing import calculate_cost
 
 _DB_INITIALIZED = False
 
@@ -40,11 +41,16 @@ def start_conversation(model:str) -> int | None:
         )
         return cursor.lastrowid
 
-def update_conversation_stats(conversation_id: int, total_tokens: int = 0, cost_per_token: dict = None):
+def update_conversation_stats(
+    conversation_id: int,
+    total_tokens: int = 0,
+    *,
+    input_tokens: int | None = None,
+    output_tokens: int | None = None,
+    cache_hit_tokens: int = 0,
+    cache_miss_tokens: int | None = None,
+):
     """Update token count and calculate approx cost for a conversation."""
-    if cost_per_token is None:
-        cost_per_token = {"deepseek/deepseek-v4-flash": 0.25, "deepseek/deepseek-v4-pro": 0.70}
-        
     with get_db_cursor() as cursor:
         cursor.execute(
             '''
@@ -59,14 +65,28 @@ def update_conversation_stats(conversation_id: int, total_tokens: int = 0, cost_
         
         model = row["model"]
 
-        approx_cost_per_million_tokens = (cost_per_token.get(model, 0.0) * total_tokens) / 1_000_000
-        
+        try:
+            if input_tokens is None and output_tokens is not None:
+                input_tokens = max(0, total_tokens - output_tokens)
+
+            approx_cost_usd = calculate_cost(
+                model,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens or 0,
+                cache_hit_tokens=cache_hit_tokens,
+                cache_miss_tokens=cache_miss_tokens,
+            )
+        except ValueError:
+            approx_cost_usd = 0.0
+
+        previous = cursor.execute("SELECT approx_cost FROM conversations WHERE conversation_id = ?",(conversation_id,),).fetchone()
+        approx_cost_usd += float(previous["approx_cost"] or 0.0)
         cursor.execute('''
         UPDATE conversations
         SET total_tokens = ?, approx_cost = ?
         WHERE conversation_id = ?
         ''',
-        (total_tokens, approx_cost_per_million_tokens, conversation_id,)
+        (total_tokens, approx_cost_usd, conversation_id,)
         )
 
 
@@ -155,4 +175,3 @@ def resume_conversation(conversation_id: int):
             "UPDATE conversations SET status = 'active', ended_at = NULL WHERE conversation_id = ?",
             (conversation_id,)
         )
-

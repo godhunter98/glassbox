@@ -620,7 +620,15 @@ def agent_loop(model: str, api_key: str, max_iterations: int = 15, resume_id: in
                 
                 if total_tokens is not None and not evalmode:
                     session_total_tokens += total_tokens
-                    queries.update_conversation_stats(conv_row_id, session_total_tokens)
+                    usage = getattr(response, "usage", None)
+                    queries.update_conversation_stats(
+                        conv_row_id,
+                        total_tokens=session_total_tokens,
+                        input_tokens=prompt_tokens,
+                        output_tokens=max(0, total_tokens - (prompt_tokens or 0)),
+                        cache_hit_tokens=getattr(usage, "prompt_cache_hit_tokens", 0) or 0,
+                        cache_miss_tokens=getattr(usage, "prompt_cache_miss_tokens", None),
+                    )
 
                 show_ttft=False
 

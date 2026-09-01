@@ -26,12 +26,14 @@ class Result:
     agent_output: str
     workspace: Path
 
+Grader = Callable[[Result], Verdict]
+
 @dataclass
 class Task:
     # A single task is the written-down pairing: this input, judged by these graders
     name: str
     agent_input: str
-    graders: list[Callable[[Result], Verdict]]
+    graders: list[Grader]
 
 
 def check_file_creation(result:Result,filename:str,file_content:str,match:Literal["contains","exact"]="contains") -> Verdict: 
