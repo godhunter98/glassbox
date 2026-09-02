@@ -47,6 +47,7 @@ def ensure_config() -> tuple[str, str] | None:
         return model, api_key
 
     if not sys.stdin.isatty():
+        # Avoid prompting for input when GlassBox is running non-interactively.
         print("Missing MODEL/API_KEY. Create a .env file or run GlassBox interactively to configure it.")
         return None
 
@@ -85,7 +86,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description="GlassBox CLI — transparent coding assistant")
     group = parser.add_mutually_exclusive_group()
     
-    group.add_argument("-r", "--resume", type=int, help="Resume conversation by ID")
+    group.add_argument("-r", "--resume", type=int, metavar="CONV_ID", help="Resume a conversation by its integer ID",)
     group.add_argument("-l", "--list", action="store_true", help="List all past conversations")
     group.add_argument("-n", "--new", action="store_true", help="Start a new session directly")
     
@@ -97,15 +98,24 @@ def main():
     print_banner()
     args = parse_args()
     
+    config = ensure_config()
+    if config is None:
+        return
+    model, api_key = config
+
     if args.list:
         available_ids = display_sessions_dashboard(all_sessions=True)
         if not available_ids:
             print("No past sessions found.")
         return
-        
+
+
     resume_id = None
+
+    # resumptions logic
     if args.resume is not None:
         resume_id = args.resume
+
     elif not args.new:
         available_ids = display_sessions_dashboard(all_sessions=False)
         if available_ids:
@@ -132,11 +142,6 @@ def main():
                 return
         else:
             resume_id = None
-
-    config = ensure_config()
-    if config is None:
-        return
-    model, api_key = config
 
     agent_loop(model, api_key, 10, resume_id=resume_id)
 
