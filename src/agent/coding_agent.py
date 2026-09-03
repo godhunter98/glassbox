@@ -32,6 +32,7 @@ from agent.context_manager import truncate_tool_output, mask_old_observations, S
 from contextlib import nullcontext
 import io
 from contextlib import redirect_stdout, redirect_stderr
+import sys
 
 DEEPSEEK_MAX_CONTEXT = 1_000_000
 EXPECTED_MAX_OUTPUT  = 384_000
@@ -55,16 +56,6 @@ os.environ["LITELLM_LOG"] = "ERROR"
 
 def get_api_base() -> str | None:
     return os.environ.get("API_BASE") or None
-
-
-def build_messages(conversation: List[Dict[str, str]]) -> List[Dict[str, str]]:
-    messages: List[Dict[str, str]] = []
-    for msg in conversation:
-        if msg["role"] == "system":
-            messages.append({"role": "system", "content": msg["content"]})
-        else:
-            messages.append(msg)
-    return messages
 
 
 def load_conversation(conversation_id: int) -> List[Dict[str, Any]]:
@@ -186,7 +177,7 @@ def print_error(context: str, message: str) -> None:
 
 def llm_completions(conversation: List[Dict[str, str]], model: str, api_key: str,spinner:Spinner=None,show_ttft=True,quiet:bool=False):
     
-    messages = build_messages(conversation)
+    messages = conversation.copy()
     if model and api_key is not None:
         kwargs = {
             "model": model,
@@ -226,7 +217,8 @@ def llm_completions(conversation: List[Dict[str, str]], model: str, api_key: str
                 last_render_time = 0
                 RENDER_INTERVAL = 1 / 15  # match your refresh rate
 
-                live_context = Live("", refresh_per_second=15, vertical_overflow="visible") if not quiet else nullcontext()
+                use_live = not quiet and sys.stdout.isatty()
+                live_context = Live("", refresh_per_second=15, vertical_overflow="visible") if use_live else nullcontext()
 
                 with live_context as live:
                     for chunk in response:
@@ -238,15 +230,17 @@ def llm_completions(conversation: List[Dict[str, str]], model: str, api_key: str
                             accumulated_text += delta.content
 
                             # increase efficiency by building only relevant chunks
-                            if not quiet:
+                            if use_live:
                                 now = time.monotonic()
                                 if now-last_render_time >= RENDER_INTERVAL:
                                     live.update(Markdown(accumulated_text))
                                     last_render_time = now 
                                     
                         chunks.append(chunk)
-                    if not quiet:
+                    if use_live:
                         live.update(Markdown(accumulated_text))
+                    elif not quiet:
+                        rprint(Markdown(accumulated_text))
 
                 end_time = time.perf_counter()
 
@@ -318,7 +312,7 @@ def run_tool_call(
 ) -> None:
     tool_name = tool_call.function.name
     try:
-        # Tool arguments arrive as JSON strings in the model response.
+        # Tool arguments arrive as JSON strings in the model response, we parse it as a python str.
         tool_args = json.loads(tool_call.function.arguments)
         args_display = ", ".join(f"{k}={v}" for k, v in tool_args.items())
         if not quiet:
@@ -548,7 +542,7 @@ def refresh_session_state(
         print(f"Error creating state object: {e}")
         return False
 
-def agent_loop(model: str, api_key: str, max_iterations: int = 15, resume_id: int = None, evalmode:bool = False, agent_input:str | None = None):
+def agent_loop(model: str, api_key: str, max_iterations: int = 15, resume_id: int | None = None, evalmode:bool = False, agent_input:str | None = None):
     
     quiet = evalmode
 
@@ -575,6 +569,7 @@ def agent_loop(model: str, api_key: str, max_iterations: int = 15, resume_id: in
             session_state = Session_state()
             session_total_tokens = conv["total_tokens"] or 0
     else:
+        # we create the conversation list and add the system prompt to it, but its not sent to the LLM until the user inputs a message, why waste an API call?
         conversation = [{"role": "system", "content": SYSTEM_PROMPT}]
         conv_row_id = None
         if not evalmode:
