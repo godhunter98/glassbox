@@ -217,7 +217,9 @@ def llm_completions(conversation: List[Dict[str, str]], model: str, api_key: str
                 last_render_time = 0
                 RENDER_INTERVAL = 1 / 15  # match your refresh rate
 
+                # check whether live render is supported or not
                 use_live = not quiet and sys.stdout.isatty()
+
                 live_context = Live("", refresh_per_second=15, vertical_overflow="visible") if use_live else nullcontext()
 
                 with live_context as live:
@@ -239,6 +241,7 @@ def llm_completions(conversation: List[Dict[str, str]], model: str, api_key: str
                         chunks.append(chunk)
                     if use_live:
                         live.update(Markdown(accumulated_text))
+                    # if streamed output cannot be printed accurately, just print the whole thing at once.
                     elif not quiet:
                         rprint(Markdown(accumulated_text))
 
