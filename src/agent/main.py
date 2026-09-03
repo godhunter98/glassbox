@@ -6,11 +6,10 @@ from agent.coding_agent import agent_loop
 from agent.animation import print_banner
 from dotenv import load_dotenv
 from agent.ui import display_sessions_dashboard
+from agent.authenticator import AuthenticationSession, Authenticator
+import questionary
 
 load_dotenv()
-
-DEFAULT_MODEL = "deepseek/deepseek-v4-flash"
-
 
 def _quote_env_value(value: str) -> str:
     return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
@@ -37,37 +36,56 @@ def _save_env_values(env_path: Path, values: dict[str, str]) -> None:
     env_path.write_text("\n".join(updated_lines) + "\n", encoding="utf-8")
 
 
-def ensure_config() -> tuple[str, str] | None:
+def ensure_config() -> tuple[str, str, str] | None:
     load_dotenv()
+    provider = os.getenv("PROVIDER", "deepseek").strip().lower()
     model = os.getenv("MODEL", "").strip()
     api_key = os.getenv("API_KEY", "").strip()
     api_base = os.getenv("API_BASE", "").strip()
 
     if model and api_key:
-        return model, api_key
+        return provider, model, api_key
 
     if not sys.stdin.isatty():
         # Avoid prompting for input when GlassBox is running non-interactively.
-        print("Missing MODEL/API_KEY. Create a .env file or run GlassBox interactively to configure it.")
+        print("Missing API configuration. Create a .env file or run GlassBox interactively to configure it.")
         return None
 
     print("GlassBox needs API configuration before first use.\n")
 
-    if not model:
-        model_input = input(f"Model [{DEFAULT_MODEL}]: ").strip()
-        model = model_input or DEFAULT_MODEL
-
     if not api_key:
-        api_key = getpass("API key: ").strip()
+        provider = questionary.select(
+            "Select a provider:",
+            choices=["deepseek", "openrouter"],
+            qmark="🤖",
+        ).ask()
+        if provider is None:
+            return None
+
+        api_key = (questionary.password(f"{provider} API key: ", qmark="🔑").ask() or "").strip()
         if not api_key:
             print("API key is required to start GlassBox.")
+            return None
+
+        authenticator = Authenticator(provider, "api_key")
+        model_list = authenticator.fetch_models(api_key)
+        if isinstance(model_list, str):
+            print(model_list)
+            return None
+
+        model = questionary.select(
+            "Select a model:",
+            choices=model_list,
+            qmark="🤖",
+        ).ask()
+        if model is None:
             return None
 
     if not api_base:
         api_base = input("API base URL (optional): ").strip()
 
     save_config = input("Save this configuration to .env? [Y/n]: ").strip().lower()
-    values = {"MODEL": model, "API_KEY": api_key}
+    values = {"PROVIDER": provider, "MODEL": model, "API_KEY": api_key}
     if api_base:
         values["API_BASE"] = api_base
 
@@ -78,7 +96,7 @@ def ensure_config() -> tuple[str, str] | None:
         print("Using configuration for this session only.")
 
     os.environ.update(values)
-    return model, api_key
+    return provider, model, api_key
 
 
 def parse_args():
@@ -96,55 +114,60 @@ def parse_args():
 
 def main():
     print_banner()
+    
     args = parse_args()
+    if args.list:
+            available_ids = display_sessions_dashboard(all_sessions=True)
+            if not available_ids:
+                print("No past sessions found.")
+            return
     
     config = ensure_config()
     if config is None:
         return
-    model, api_key = config
+    provider, model, api_key = config
 
-    if args.list:
-        available_ids = display_sessions_dashboard(all_sessions=True)
-        if not available_ids:
-            print("No past sessions found.")
-        return
+    authenticator = Authenticator(provider, "api_key")
+    session = authenticator.authenticate(model,api_key)
 
+    if isinstance(session,AuthenticationSession):
+        
+        resume_id = None
+        # resumptions logic
+        if args.resume is not None:
+            resume_id = args.resume
 
-    resume_id = None
-
-    # resumptions logic
-    if args.resume is not None:
-        resume_id = args.resume
-
-    elif not args.new:
-        available_ids = display_sessions_dashboard(all_sessions=False)
-        if available_ids:
-            try:
-                user_input = input("\nEnter session ID to resume, or press Enter to start a new session: ").strip()
-                if user_input:
-                    if user_input.lower() in ["n", "new"]:
-                        resume_id = None
-                    else:
-                        try:
-                            selected_id = int(user_input)
-                            if selected_id in available_ids:
-                                resume_id = selected_id
-                            else:
-                                print(f"Invalid ID '{selected_id}'. Starting a new session instead.")
-                                resume_id = None
-                        except ValueError:
-                            print(f"Invalid input '{user_input}'. Starting a new session instead.")
+        elif not args.new:
+            available_ids = display_sessions_dashboard(all_sessions=False)
+            if available_ids:
+                try:
+                    user_input = input("\nEnter session ID to resume, or press Enter to start a new session: ").strip()
+                    if user_input:
+                        if user_input.lower() in ["n", "new"]:
                             resume_id = None
-                else:
-                    resume_id = None
-            except (KeyboardInterrupt, EOFError):
-                print("\nGoodbye! 👋")
-                return
-        else:
-            resume_id = None
+                        else:
+                            try:
+                                selected_id = int(user_input)
+                                if selected_id in available_ids:
+                                    resume_id = selected_id
+                                else:
+                                    print(f"Invalid ID '{selected_id}'. Starting a new session instead.")
+                                    resume_id = None
+                            except ValueError:
+                                print(f"Invalid input '{user_input}'. Starting a new session instead.")
+                                resume_id = None
+                    else:
+                        resume_id = None
+                except (KeyboardInterrupt, EOFError):
+                    print("\nGoodbye! 👋")
+                    return
+            else:
+                resume_id = None
 
-    agent_loop(model, api_key, 10, resume_id=resume_id)
+        agent_loop(session, 10, resume_id=resume_id)
 
+    elif isinstance(session,str):
+        print(f"{session}")
 
 if __name__ == "__main__":
     main()

@@ -9,6 +9,7 @@ import json
 from rich.live import Live
 from rich.markdown import Markdown
 from rich import print as rprint
+from agent.authenticator import AuthenticationSession
 from agent.storage import queries
 from agent.tools import (
     get_tool_schema,
@@ -545,7 +546,7 @@ def refresh_session_state(
         print(f"Error creating state object: {e}")
         return False
 
-def agent_loop(model: str, api_key: str, max_iterations: int = 15, resume_id: int | None = None, evalmode:bool = False, agent_input:str | None = None):
+def agent_loop(session: AuthenticationSession, max_iterations: int = 15, resume_id: int | None = None, evalmode:bool = False, agent_input:str | None = None):
     
     quiet = evalmode
 
@@ -560,7 +561,7 @@ def agent_loop(model: str, api_key: str, max_iterations: int = 15, resume_id: in
         if not conv:
             print_error("Resume Error", f"Conversation with ID {resume_id} not found. Starting a new session instead.")
             conversation = [{"role": "system", "content": SYSTEM_PROMPT}]
-            conv_row_id = queries.start_conversation(model)
+            conv_row_id = queries.start_conversation(session.model)
             session_total_tokens = 0
             session_state = Session_state()
         else:
@@ -576,7 +577,7 @@ def agent_loop(model: str, api_key: str, max_iterations: int = 15, resume_id: in
         conversation = [{"role": "system", "content": SYSTEM_PROMPT}]
         conv_row_id = None
         if not evalmode:
-            conv_row_id = queries.start_conversation(model)
+            conv_row_id = queries.start_conversation(session.model)
         session_total_tokens = 0
         session_state = Session_state()
 
@@ -614,7 +615,7 @@ def agent_loop(model: str, api_key: str, max_iterations: int = 15, resume_id: in
             while current_iteration<=max_iterations:
                 current_iteration+=1
 
-                response, prompt_tokens, total_tokens,completion_tokens = llm_completions(conversation, model, api_key,spinner=spinner,show_ttft=show_ttft,quiet=quiet)
+                response, prompt_tokens, total_tokens,completion_tokens = llm_completions(conversation, session.model, session.api_key,spinner=spinner,show_ttft=show_ttft,quiet=quiet)
                 
                 if total_tokens is not None and not evalmode:
                     session_total_tokens += total_tokens
@@ -652,8 +653,8 @@ def agent_loop(model: str, api_key: str, max_iterations: int = 15, resume_id: in
                             if prompt_tokens is not None and prompt_tokens - last_state_refresh_tokens >= STATE_INJECT_GROWTH and not evalmode:
                                 refreshed = refresh_session_state(
                                     conversation,
-                                    model,
-                                    api_key,
+                                    session.model,
+                                    session.api_key,
                                     session_state,
                                 )
                                 if refreshed:
@@ -678,8 +679,8 @@ def agent_loop(model: str, api_key: str, max_iterations: int = 15, resume_id: in
                             print(f"{INFO_COLOR}  ✂️  Pruned conversation: {before_count} → {len(conversation)} messages{RESET_COLOR}")
                             refreshed = refresh_session_state(
                                     conversation,
-                                    model,
-                                    api_key,
+                                    session.model,
+                                    session.api_key,
                                     session_state,
                                 )
                             if refreshed:
@@ -720,7 +721,7 @@ def agent_loop(model: str, api_key: str, max_iterations: int = 15, resume_id: in
     # Always generate summary and mark completed on exit
     if not evalmode:
         try:
-            conv_summary = generate_conversation_summary(conversation, model, api_key)
+            conv_summary = generate_conversation_summary(conversation, session.model, session.api_key)
         except (KeyboardInterrupt, Exception) as e:
             print(f"\n{INFO_COLOR}Summary skipped ({type(e).__name__}){RESET_COLOR}")
             conv_summary = "Untitled session"
@@ -728,7 +729,3 @@ def agent_loop(model: str, api_key: str, max_iterations: int = 15, resume_id: in
 
         queries.mark_conversation_completed(conv_row_id, conv_summary)
         print(f"\n{INFO_COLOR}Goodbye! 👋{RESET_COLOR}")
-
-
-if __name__ == "__main__":
-    agent_loop(model=os.getenv("MODEL",""),api_key=os.getenv("API_KEY",""))
