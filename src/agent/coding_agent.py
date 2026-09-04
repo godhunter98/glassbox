@@ -4,7 +4,6 @@ import warnings
 import time
 import logging
 from typing import Any, Dict, List
-from litellm import litellm
 import json
 
 from prompt_toolkit import PromptSession
@@ -196,7 +195,8 @@ def print_error(context: str, message: str) -> None:
 
 
 def llm_completions(conversation: List[Dict[str, str]], model: str, api_key: str,spinner:Spinner=None,show_ttft=True,quiet:bool=False):
-    
+    from litellm import litellm
+
     messages = conversation.copy()
     if model and api_key is not None:
         kwargs = {
@@ -439,6 +439,8 @@ def handle_assistant_message(assistant_message, conversation: List[Dict[str, Any
 
 
 def generate_conversation_summary(conversation: List[Dict[str,Any]],model:str,api_key:str) -> str:
+    from litellm import litellm
+
     '''Generate a summary from the completed conversation.'''
     print(f"\n{INFO_COLOR}Saving conversation...{RESET_COLOR}")
     
@@ -510,6 +512,8 @@ def refresh_session_state(
     api_key: str,
     session_state: Session_state,
 ) -> bool:
+    from litellm import litellm
+
     instruction = [
         {
             "role": "system",

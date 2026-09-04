@@ -4,7 +4,7 @@ import os
 import sys
 from pathlib import Path
 
-import questionary
+
 from dotenv import load_dotenv
 
 from agent.authenticator import AuthenticationSession, Authenticator
@@ -49,7 +49,7 @@ class ConfigManager:
         api_base: str,
     ) -> AuthenticationSession | None:
         print("GlassBox configuration\n")
-
+        import questionary
         if not provider:
             provider = questionary.select(
                 "Select a provider:",

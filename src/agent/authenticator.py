@@ -1,7 +1,5 @@
 from dataclasses import dataclass
 from typing import Literal
-from litellm import litellm
-import requests
 
 
 @dataclass
@@ -27,6 +25,7 @@ class Authenticator:
             return f"Model discovery is not supported for provider '{self.provider}'."
 
         try:
+            import requests
             response = requests.get(
                 endpoint,
                 headers={"Authorization": f"Bearer {api_key}"},
@@ -60,7 +59,7 @@ class Authenticator:
         if self.auth_method.strip().lower() == "api_key":
             if not model or not api_key:
                 return "Authentication failed: MODEL and API_KEY are required."
-
+            from litellm import litellm
             kwargs = {
                 "model": model,
                 "api_key": api_key,

@@ -44,16 +44,15 @@ def main():
         if available_ids:
             try:
                 user_input = input("\nEnter session ID to resume, or press Enter to start a new session: ").strip()
-                if user_input:
-                    if user_input.lower() not in ["n", "new"]:
-                        try:
-                            selected_id = int(user_input)
-                            if selected_id in available_ids:
-                                resume_id = selected_id
-                            else:
-                                print(f"Invalid ID '{selected_id}'. Starting a new session instead.")
-                        except ValueError:
-                            print(f"Invalid input '{user_input}'. Starting a new session instead.")
+                if user_input and user_input.lower() not in ["n", "new"]:
+                    try:
+                        selected_id = int(user_input)
+                        if selected_id in available_ids:
+                            resume_id = selected_id
+                        else:
+                            print(f"Invalid ID '{selected_id}'. Starting a new session instead.")
+                    except ValueError:
+                        print(f"Invalid input '{user_input}'. Starting a new session instead.")
 
             except (KeyboardInterrupt, EOFError):
                 print("\nGoodbye! 👋")
