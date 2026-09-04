@@ -441,6 +441,7 @@ dependencies = [
     { name = "dotenv" },
     { name = "litellm" },
     { name = "questionary" },
+    { name = "requests" },
     { name = "rich" },
 ]
 
@@ -455,6 +456,7 @@ requires-dist = [
     { name = "dotenv", specifier = ">=0.9.9" },
     { name = "litellm", specifier = "==1.89.3" },
     { name = "questionary", specifier = ">=2.1.1" },
+    { name = "requests", specifier = ">=2.32.0" },
     { name = "rich", specifier = ">=14.3.3" },
 ]
 

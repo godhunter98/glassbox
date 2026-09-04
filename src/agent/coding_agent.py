@@ -6,11 +6,20 @@ import logging
 from typing import Any, Dict, List
 from litellm import litellm
 import json
+
+from prompt_toolkit import PromptSession
+from prompt_toolkit.application.current import get_app
+from prompt_toolkit.completion import ConditionalCompleter, WordCompleter
+from prompt_toolkit.filters import Condition
+from prompt_toolkit.formatted_text import FormattedText
+from prompt_toolkit.styles import Style
+
 from rich.live import Live
 from rich.markdown import Markdown
 from rich import print as rprint
+
 from agent.authenticator import AuthenticationSession
-from agent.config_manager import ConfigManager
+from agent.command_runner import CommandRunner
 from agent.storage import queries
 from agent.tools import (
     get_tool_schema,
@@ -55,6 +64,15 @@ os.environ["LITELLM_IGNORE_PYDANTIC_WARNINGS"] = "1"
 logging.getLogger("litellm").setLevel(logging.WARNING)
 os.environ["LITELLM_LOG"] = "ERROR"
 
+
+# for managing the user input
+PROMPT_STYLE = Style.from_dict({"user-prompt": "ansiblue"})
+COMMAND_COMPLETER = ConditionalCompleter(
+    WordCompleter(["/help", "/config", "/exit"]),
+    filter=Condition(
+        lambda: get_app().current_buffer.document.text_before_cursor.lstrip().startswith("/")
+    ),
+)
 
 def get_api_base() -> str | None:
     return os.environ.get("API_BASE") or None
@@ -548,14 +566,20 @@ def refresh_session_state(
         return False
 
 def agent_loop(session: AuthenticationSession, max_iterations: int = 15, resume_id: int | None = None, evalmode:bool = False, agent_input:str | None = None):
-    
     quiet = evalmode
+    
+    # for managing the user input
+    command_runner = CommandRunner()
+    prompt_session = PromptSession(
+        completer=COMMAND_COMPLETER,
+        style=PROMPT_STYLE,
+    )
 
     if not evalmode:
         print(
             f"{SUCCESS_COLOR}{SUCCESS_ICON} Spinning up agent...{RESET_COLOR}"
         )
-        print(f"{INFO_COLOR}Type 'exit' or press Ctrl+C to quit.{RESET_COLOR}\n")
+        print(f"{INFO_COLOR}Type 'exit' or press Ctrl+C to exit.{RESET_COLOR}\n")
 
     if resume_id is not None:
         conv = queries.get_conversation(resume_id)
@@ -589,7 +613,9 @@ def agent_loop(session: AuthenticationSession, max_iterations: int = 15, resume_
         while True:   
             if not evalmode:
                 try:
-                    user_input = input(f"\n{YOU_COLOR}You:{RESET_COLOR} ")
+                    user_input = prompt_session.prompt(
+                        FormattedText([("class:user-prompt", "\nYou: ")]),
+                    )
                 except (KeyboardInterrupt, EOFError):
                     print()
                     break
@@ -597,21 +623,12 @@ def agent_loop(session: AuthenticationSession, max_iterations: int = 15, resume_
                 if not user_input.strip():
                     continue
 
-                if user_input.lower() in ["exit", "quit"]:
-                    break
-
-                if user_input.strip().lower() == "/config":
-                    updated_session = ConfigManager().configure()
-                    if updated_session is not None:
-                        queries.mark_conversation_completed(conv_row_id, "Configuration changed.")
-                        session = updated_session
-                        conversation = [{"role": "system", "content": SYSTEM_PROMPT}]
-                        conv_row_id = queries.start_conversation(session.model)
-                        session_total_tokens = 0
-                        session_state = Session_state()
-                        last_state_refresh_tokens = 0
-                        show_ttft = True
-                        print(f"{INFO_COLOR}Configuration updated. Started a new conversation.{RESET_COLOR}")
+                command_result = command_runner.run(user_input)
+                if command_result.handled:
+                    if command_result.message:
+                        print(f"{INFO_COLOR}{command_result.message}{RESET_COLOR}")
+                    if command_result.should_exit:
+                        break
                     continue
             
             else:
