@@ -1,16 +1,19 @@
 # GlassBox 🔍
 
-A transparent, provider-agnostic CLI coding assistant powered by LLMs via [litellm](https://github.com/BerriAI/litellm).
+A local, transparent CLI coding assistant powered by LLMs via [LiteLLM](https://github.com/BerriAI/litellm).
 
 <img width="1536" height="1024" alt="image" src="https://github.com/user-attachments/assets/7e874f02-f69b-4045-8ba3-351b3c38aaac" />
 
 ## Features
 
 - 5 tools: read, list, edit files · run bash commands · run bash scripts
-- Built on LiteLLM, with DeepSeek-oriented tool schema support and optional local API base URL
+- Provider setup for DeepSeek and OpenRouter, with model discovery and API-key validation
+- Saved local configuration for provider, model, API key, and optional API base URL
+- Slash commands with autocomplete: `/help`, `/config`, and `/exit`
 - Safety checks on shell commands with warn + confirm prompt
 - Animated terminal UI — block-letter banner, braille spinner
 - Conversation persistence with session listing and resume support
+- Fast CLI startup: provider and agent dependencies load only when needed
 - Pytest coverage for tools, CLI routing, and resume reconstruction
 
 ## Installation
@@ -25,17 +28,27 @@ Or with pip: `pip install -e .`
 
 ## Configuration
 
-Create a `.env` file:
+Run interactive setup:
+
+```bash
+agent --configure
+```
+
+GlassBox lets you choose DeepSeek or OpenRouter, enter an API key, fetch the
+available models, and optionally save the result to `.env`.
+
+You can also create `.env` manually:
 
 ```env
+PROVIDER="deepseek"
 MODEL="deepseek/deepseek-v4-flash"
 API_KEY="your-api-key-here"
 API_BASE="http://localhost:8000/v1"  # optional, for local models
 ```
 
-If `MODEL` or `API_KEY` is missing, GlassBox will prompt you to set them up on first run.
-
-Any model supported by litellm works.
+If configuration is incomplete, GlassBox starts the same interactive setup on
+the next run. Saved credentials are used immediately; they are validated when
+you configure them and again naturally on the first model request.
 
 ## Usage
 
@@ -53,9 +66,19 @@ Useful options:
 agent -n          # start a new session
 agent -l          # list past sessions
 agent -r 3        # resume conversation ID 3
+agent -c          # configure provider, API key, and model
 ```
 
-Inside a session, type `exit`, `quit`, or press `Ctrl+C` to quit.
+Inside a session, use:
+
+```text
+/help             # show available commands
+/config           # show configuration guidance
+/exit             # save and exit
+```
+
+Command suggestions appear after typing `/`. You can also type `exit` or press
+`Ctrl+C` to leave the session.
 
 ## Project structure
 
@@ -65,6 +88,9 @@ glassbox/
 │   └── agent/
 │       ├── main.py              # CLI entrypoint and session selection
 │       ├── coding_agent.py      # agent loop, LLM calls, tool execution
+│       ├── authenticator.py     # provider credentials and model discovery
+│       ├── config_manager.py    # interactive setup and .env persistence
+│       ├── command_runner.py    # local slash-command handling
 │       ├── tools.py             # tool implementations and schemas
 │       ├── context_manager.py   # context truncation and session state
 │       ├── prompts.py           # system prompt
@@ -99,7 +125,8 @@ If you already have the local virtual environment set up:
 
 ## Troubleshooting
 
-- Missing env vars → set `MODEL` and `API_KEY` in `.env`
+- Missing configuration → run `agent --configure`
 - LLM call fails → check API key, model name, and network
+- Provider model list fails → check your API key and provider network access
 - File errors → verify path and permissions
 - `python main.py` fails → use `agent` or `python -m agent.main`; the entrypoint lives under `src/agent/`
