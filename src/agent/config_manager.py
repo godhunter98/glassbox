@@ -25,7 +25,7 @@ class ConfigManager:
         provider, model, api_key, api_base = self._load_values()
 
         if provider and model and api_key:
-            return self._authenticate(provider, model, api_key)
+            return AuthenticationSession(provider, model, "api_key", api_key)
 
         if not sys.stdin.isatty():
             print("Missing API configuration. Create a .env file or run GlassBox interactively to configure it.")

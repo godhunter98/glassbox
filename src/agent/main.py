@@ -1,4 +1,3 @@
-from agent.coding_agent import agent_loop
 from agent.animation import print_banner
 from agent.config_manager import ConfigManager
 from agent.ui import display_sessions_dashboard
@@ -59,6 +58,8 @@ def main():
             except (KeyboardInterrupt, EOFError):
                 print("\nGoodbye! 👋")
                 return
+
+    from agent.coding_agent import agent_loop
 
     agent_loop(session, 10, resume_id=resume_id)
 

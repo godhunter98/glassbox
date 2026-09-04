@@ -68,7 +68,7 @@ os.environ["LITELLM_LOG"] = "ERROR"
 # for managing the user input
 PROMPT_STYLE = Style.from_dict({"user-prompt": "ansiblue"})
 COMMAND_COMPLETER = ConditionalCompleter(
-    WordCompleter(["/help", "/config", "/exit"]),
+    WordCompleter(["/help", "/config", "/exit"],WORD=True),
     filter=Condition(
         lambda: get_app().current_buffer.document.text_before_cursor.lstrip().startswith("/")
     ),
@@ -573,6 +573,7 @@ def agent_loop(session: AuthenticationSession, max_iterations: int = 15, resume_
     prompt_session = PromptSession(
         completer=COMMAND_COMPLETER,
         style=PROMPT_STYLE,
+        complete_while_typing=True
     )
 
     if not evalmode:
@@ -623,6 +624,7 @@ def agent_loop(session: AuthenticationSession, max_iterations: int = 15, resume_
                 if not user_input.strip():
                     continue
 
+                # handle if any commands by the user
                 command_result = command_runner.run(user_input)
                 if command_result.handled:
                     if command_result.message:

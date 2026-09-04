@@ -18,7 +18,7 @@ class CommandRunner:
     def run(self, user_input: str) -> CommandResult:
         command = user_input.strip().lower()
 
-        if command in {"exit", "quit", "/exit"}:
+        if command in {"exit","/exit"}:
             return CommandResult(handled=True, should_exit=True)
 
         if command == "/help":
