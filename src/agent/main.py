@@ -1,7 +1,7 @@
 import os
 import sys
-from getpass import getpass
 from pathlib import Path
+
 from agent.coding_agent import agent_loop
 from agent.animation import print_banner
 from dotenv import load_dotenv
@@ -10,6 +10,8 @@ from agent.authenticator import AuthenticationSession, Authenticator
 import questionary
 
 load_dotenv()
+
+SUPPORTED_PROVIDERS = ("deepseek", "openrouter")
 
 def _quote_env_value(value: str) -> str:
     return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
@@ -38,12 +40,12 @@ def _save_env_values(env_path: Path, values: dict[str, str]) -> None:
 
 def ensure_config() -> tuple[str, str, str] | None:
     load_dotenv()
-    provider = os.getenv("PROVIDER", "deepseek").strip().lower()
+    provider = os.getenv("PROVIDER", "").strip().lower()
     model = os.getenv("MODEL", "").strip()
     api_key = os.getenv("API_KEY", "").strip()
     api_base = os.getenv("API_BASE", "").strip()
 
-    if model and api_key:
+    if provider and model and api_key:
         return provider, model, api_key
 
     if not sys.stdin.isatty():
@@ -53,20 +55,23 @@ def ensure_config() -> tuple[str, str, str] | None:
 
     print("GlassBox needs API configuration before first use.\n")
 
-    if not api_key:
+    if not provider:
         provider = questionary.select(
             "Select a provider:",
-            choices=["deepseek", "openrouter"],
+            choices=SUPPORTED_PROVIDERS,
             qmark="🤖",
         ).ask()
         if provider is None:
             return None
 
+    if not api_key:
         api_key = (questionary.password(f"{provider} API key: ", qmark="🔑").ask() or "").strip()
         if not api_key:
             print("API key is required to start GlassBox.")
             return None
 
+    selected_model_this_session = False
+    if not model:
         authenticator = Authenticator(provider, "api_key")
         model_list = authenticator.fetch_models(api_key)
         if isinstance(model_list, str):
@@ -80,15 +85,27 @@ def ensure_config() -> tuple[str, str, str] | None:
         ).ask()
         if model is None:
             return None
+        selected_model_this_session = True
+
+    save_model = True
+    if selected_model_this_session:
+        save_model = questionary.confirm(
+            f"Use {model} as the default model?",
+            default=True,
+        ).ask()
+        if save_model is None:
+            return None
 
     if not api_base:
         api_base = input("API base URL (optional): ").strip()
 
-    save_config = input("Save this configuration to .env? [Y/n]: ").strip().lower()
-    values = {"PROVIDER": provider, "MODEL": model, "API_KEY": api_key}
+    values = {"PROVIDER": provider, "API_KEY": api_key}
+    if save_model:
+        values["MODEL"] = model
     if api_base:
         values["API_BASE"] = api_base
 
+    save_config = input("Save this configuration to .env? [Y/n]: ").strip().lower()
     if save_config in ("", "y", "yes"):
         _save_env_values(Path.cwd() / ".env", values)
         print("Configuration saved. Starting GlassBox...")
@@ -96,6 +113,7 @@ def ensure_config() -> tuple[str, str, str] | None:
         print("Using configuration for this session only.")
 
     os.environ.update(values)
+
     return provider, model, api_key
 
 

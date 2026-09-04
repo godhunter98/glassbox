@@ -4,7 +4,6 @@ from litellm import litellm
 import requests
 
 
-
 @dataclass
 class AuthenticationSession:
     provider: str
@@ -12,15 +11,14 @@ class AuthenticationSession:
     auth_method: str
     api_key: str
 
-
-
 class Authenticator:
     """Handle authentication for supported LLM providers."""
 
     def __init__(self, provider: str, auth_method: Literal["Oauth", "api_key"]) -> None:
         self.provider = provider
         self.auth_method = auth_method
-        self.MODEL_LIST_URLS = {"deepseek": "https://api.deepseek.com/models","openrouter": "https://openrouter.ai/api/v1/models"}
+        self.MODEL_LIST_URLS = {"deepseek": "https://api.deepseek.com/models",
+                                "openrouter": "https://openrouter.ai/api/v1/models"}
 
     def fetch_models(self, api_key: str) -> list[str] | str:
         """Return model identifiers available from the authenticated provider."""
