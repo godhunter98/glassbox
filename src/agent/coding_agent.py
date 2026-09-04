@@ -10,6 +10,7 @@ from rich.live import Live
 from rich.markdown import Markdown
 from rich import print as rprint
 from agent.authenticator import AuthenticationSession
+from agent.config_manager import ConfigManager
 from agent.storage import queries
 from agent.tools import (
     get_tool_schema,
@@ -598,6 +599,20 @@ def agent_loop(session: AuthenticationSession, max_iterations: int = 15, resume_
 
                 if user_input.lower() in ["exit", "quit"]:
                     break
+
+                if user_input.strip().lower() == "/config":
+                    updated_session = ConfigManager().configure()
+                    if updated_session is not None:
+                        queries.mark_conversation_completed(conv_row_id, "Configuration changed.")
+                        session = updated_session
+                        conversation = [{"role": "system", "content": SYSTEM_PROMPT}]
+                        conv_row_id = queries.start_conversation(session.model)
+                        session_total_tokens = 0
+                        session_state = Session_state()
+                        last_state_refresh_tokens = 0
+                        show_ttft = True
+                        print(f"{INFO_COLOR}Configuration updated. Started a new conversation.{RESET_COLOR}")
+                    continue
             
             else:
                 user_input = agent_input
