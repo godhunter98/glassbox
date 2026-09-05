@@ -17,7 +17,7 @@ from rich.live import Live
 from rich.markdown import Markdown
 from rich import print as rprint
 
-from agent.authenticator import AuthenticationSession
+from agent.authenticator import AuthenticationSession, Authenticator
 from agent.command_runner import CommandRunner
 from agent.storage import queries
 from agent.tools import (
@@ -67,7 +67,7 @@ os.environ["LITELLM_LOG"] = "ERROR"
 # for managing the user input
 PROMPT_STYLE = Style.from_dict({"user-prompt": "ansiblue"})
 COMMAND_COMPLETER = ConditionalCompleter(
-    WordCompleter(["/help", "/config", "/exit"],WORD=True),
+    WordCompleter(["/help", "/model","/config", "/exit"],WORD=True),
     filter=Condition(
         lambda: get_app().current_buffer.document.text_before_cursor.lstrip().startswith("/")
     ),
@@ -635,6 +635,24 @@ def agent_loop(session: AuthenticationSession, max_iterations: int = 15, resume_
                         print(f"{INFO_COLOR}{command_result.message}{RESET_COLOR}")
                     if command_result.should_exit:
                         break
+                    if command_result.action == "change_model":
+                        import questionary
+
+                        print(f"{INFO_COLOR}Fetching available models...{RESET_COLOR}")
+                        models = Authenticator(session.provider, "api_key").fetch_models(session.api_key)
+                        if isinstance(models, str):
+                            print_error("Model error", models)
+                            continue
+
+                        updated_model = questionary.select(
+                            "Select a model:",
+                            choices=models,
+                            qmark="🤖",
+                        ).ask()
+                        if updated_model:
+                            session.model = updated_model
+                            queries.update_conversation_model(conv_row_id, updated_model)
+                            print(f"{SUCCESS_COLOR}{SUCCESS_ICON} Using model: {updated_model}{RESET_COLOR}")
                     continue
             
             else:

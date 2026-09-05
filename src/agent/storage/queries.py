@@ -41,6 +41,17 @@ def start_conversation(model:str) -> int | None:
         )
         return cursor.lastrowid
 
+def update_conversation_model(conversation_id: int | None, model: str) -> None:
+    """Store the model currently selected for an active conversation."""
+    if conversation_id is None:
+        return
+
+    with get_db_cursor() as cursor:
+        cursor.execute(
+            "UPDATE conversations SET model = ? WHERE conversation_id = ?",
+            (model, conversation_id),
+        )
+
 def update_conversation_stats(
     conversation_id: int | None,
     total_tokens: int = 0,

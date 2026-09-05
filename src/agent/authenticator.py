@@ -17,7 +17,7 @@ class Authenticator:
         self.auth_method = auth_method
         self.MODEL_LIST_URLS = {"deepseek": "https://api.deepseek.com/models",
                                 "openrouter": "https://openrouter.ai/api/v1/models"}
-
+    
     def fetch_models(self, api_key: str) -> list[str] | str:
         """Return model identifiers available from the authenticated provider."""
         endpoint = self.MODEL_LIST_URLS.get(self.provider.lower())

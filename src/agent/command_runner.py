@@ -6,6 +6,7 @@ from dataclasses import dataclass
 @dataclass(frozen=True)
 class CommandResult:
     handled: bool
+    action: str | None = None
     should_exit: bool = False
     message: str | None = None
 
@@ -13,7 +14,7 @@ class CommandResult:
 class CommandRunner:
     """Recognize and handle commands without sending them to the LLM."""
 
-    HELP_TEXT = "Available commands: /help, /exit, /config"
+    HELP_TEXT = "Available commands: /help, /model, /exit, /config"
 
     def run(self, user_input: str) -> CommandResult:
         command = user_input.strip().lower()
@@ -28,6 +29,12 @@ class CommandRunner:
             return CommandResult(
                 handled=True,
                 message="Run `agent --configure` before starting a conversation to change configuration.",
+            )
+
+        if command == "/model":
+            return CommandResult(
+                handled=True,
+                action="change_model",
             )
 
         if command.startswith("/"):
