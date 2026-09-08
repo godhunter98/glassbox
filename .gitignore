@@ -31,6 +31,7 @@ play.py
 decorators.py
 ralph*
 *.svg
+*.png
 
 # Database
 *.db
@@ -41,3 +42,4 @@ schema.md
 
 # Profiler output
 profiles/
+*scalene*
