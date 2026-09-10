@@ -8,6 +8,7 @@ dependencies = [
     "authlib>=1.8.0",
     "dotenv>=0.9.9",
     "litellm==1.89.3",
+    "pyjwt>=2.13.0",
     "questionary>=2.1.1",
     "requests>=2.32.0",
     "rich>=14.3.3",
