@@ -337,7 +337,7 @@ def load_auth_token() -> dict[str, object] | None:
         raise RuntimeError("Stored OpenAI credentials are not valid JSON.") from error
 
     if not isinstance(data, dict):
-        raise RuntimeError("Stored OpenAI credentials must be a JSON object.")
+        raise TypeError("Stored OpenAI credentials must be a JSON object.")
 
     for field in ("access_token", "refresh_token", "id_token"):
         if not isinstance(data.get(field), str) or not data[field]:
@@ -353,8 +353,7 @@ def load_auth_token() -> dict[str, object] | None:
 
     return data
 
-
-def main() -> dict[str] | None:
+def generate_and_store_token():
     token = run_login()
     id_token = token.get("id_token")
     access_token = token.get("access_token")
@@ -364,7 +363,6 @@ def main() -> dict[str] | None:
         raise TypeError("OpenAI token response did not include a numeric expires_in.")
     expires_at = received_at + expires_in
     refresh_token = token.get("refresh_token")
-
     if id_token and validate_id_token(id_token,access_token):
             tokens_dict= {"access_token":access_token,
             "refresh_token":refresh_token,
@@ -374,5 +372,20 @@ def main() -> dict[str] | None:
             store_auth_token(tokens_dict)
             print("Successfully authenticated with OpenAI!")
 
+def _is_access_token_usable(expiry:float) -> bool:
+    return expiry > time.time() + 60
+
+def fetch_credentials_for_request() -> dict[str] | None:
+    # check if credentials already exist
+    while True:
+        credentials = load_auth_token()
+        if credentials is not None:
+            if  _is_access_token_usable(credentials.get("expires_at")):
+                return credentials
+            else:
+                generate_and_store_token()
+        else:
+            generate_and_store_token()
+
 if __name__ == "__main__":
-    main()
+    fetch_credentials_for_request()
