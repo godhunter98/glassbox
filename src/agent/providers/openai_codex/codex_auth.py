@@ -18,6 +18,7 @@ import jwt
 import questionary
 import requests
 from authlib.integrations.requests_client import OAuth2Session
+from authlib.oauth2.rfc6749.errors import OAuth2Error
 
 AUTHORIZATION_URL = "https://auth.openai.com/oauth/authorize"
 TOKEN_URL = "https://auth.openai.com/oauth/token"
@@ -37,6 +38,10 @@ TOKEN_EXPIRY_SKEW_SECONDS = 60
 TokenRecord = dict[str, str | float]
 
 
+class RefreshTokenError(RuntimeError):
+    """Raised when OpenAI cannot exchange a stored refresh token."""
+
+
 def _create_oauth_session() -> OAuth2Session:
     """Create the public OAuth client used for OpenAI Codex authentication."""
     return OAuth2Session(
@@ -46,7 +51,6 @@ def _create_oauth_session() -> OAuth2Session:
         token_endpoint_auth_method="none",
         code_challenge_method="S256",
     )
-
 
 def is_callback_url(value: str | None, state: str) -> bool:
     """Return whether a redirect URL belongs to this OAuth login attempt."""
@@ -368,15 +372,45 @@ def _is_access_token_usable(expires_at: float) -> bool:
     return expires_at > time.time() + TOKEN_EXPIRY_SKEW_SECONDS
 
 
-def fetch_credentials_for_request() -> TokenRecord:
-    """Return usable credentials, starting browser login when required."""
-    credentials = load_auth_token()
-    if credentials is not None:
-        expires_at = credentials["expires_at"]
-        if isinstance(expires_at, float) and _is_access_token_usable(expires_at):
-            return credentials
-    return generate_and_store_token()
+def refresh_and_store_token(credentials: TokenRecord) -> TokenRecord:
+    """Exchange a stored refresh token and atomically persist the new record."""
+    refresh_token = credentials["refresh_token"]
+    if not isinstance(refresh_token, str):
+        raise RefreshTokenError("Stored OpenAI refresh token is invalid.")
 
+    try:
+        token = dict(
+            _create_oauth_session().refresh_token(
+                TOKEN_URL,
+                refresh_token=refresh_token,
+            )
+        )
+        # OpenAI may keep the same refresh token rather than rotate it.
+        if not token.get("refresh_token"):
+            token["refresh_token"] = refresh_token
+        token_record = _create_token_record(token)
+    except (OAuth2Error, requests.RequestException, RuntimeError, ValueError, jwt.PyJWTError) as error:
+        raise RefreshTokenError("OpenAI refresh-token exchange failed.") from error
+
+    store_auth_token(token_record)
+    return token_record
+
+
+def fetch_credentials_for_request() -> TokenRecord:
+    """Return usable credentials, refreshing or logging in when required."""
+    credentials = load_auth_token()
+    if credentials is None:
+        return generate_and_store_token()
+
+    expires_at = credentials["expires_at"]
+    if isinstance(expires_at, float) and _is_access_token_usable(expires_at):
+        return credentials
+
+    try:
+        return refresh_and_store_token(credentials)
+    except RefreshTokenError:
+        print("Stored OpenAI credentials could not be refreshed; please log in again.")
+        return generate_and_store_token()
 
 def main() -> None:
     fetch_credentials_for_request()
