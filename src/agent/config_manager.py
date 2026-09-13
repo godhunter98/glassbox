@@ -10,8 +10,8 @@ from dotenv import load_dotenv
 from agent.authenticator import AuthenticationSession, Authenticator
 
 
-SUPPORTED_PROVIDERS = ("deepseek", "openrouter")
-
+SUPPORTED_PROVIDERS = ("deepseek", "openrouter", "OpenAI")
+# LOGIN_CHOICES = ("Sign with an API_KEY","Sign in with your ")
 
 class ConfigManager:
     """Create authenticated provider sessions from saved or interactive settings."""
@@ -39,14 +39,15 @@ class ConfigManager:
             print("Configuration requires an interactive terminal.")
             return None
 
-        return self._configure("", "", "", "")
+        return self._configure("", "", "", "","")
 
     def _configure(
         self,
         provider: str,
         model: str,
-        api_key: str,
+        api_key: str | None,
         api_base: str,
+        auth_method: str,
     ) -> AuthenticationSession | None:
         print("GlassBox configuration\n")
         import questionary
@@ -56,10 +57,17 @@ class ConfigManager:
                 choices=SUPPORTED_PROVIDERS,
                 qmark="🤖",
             ).ask()
-            if provider is None:
-                return None
+            if not auth_method:
+                if provider.lower() == "openai":
+                    choices = [" 1. Use an API key"," 2. Use a ChatGPT Plus/Pro account (Codex)"]
+                selected_method = questionary.select(
+                                "How would you like to authenticate?",
+                                choices=choices,
+                                qmark="\n🔐",
+                            ).ask()
+                auth_method = "Oauth" if selected_method == choices[1] else "api_key"
 
-        if not api_key:
+        if not api_key and auth_method!= "Oauth" :
             api_key = (questionary.password(f"{provider} API key:", qmark="🔑").ask() or "").strip()
             if not api_key:
                 print("API key is required to start GlassBox.")

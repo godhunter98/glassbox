@@ -1,13 +1,12 @@
 from dataclasses import dataclass
-from typing import Literal
-
+from typing import Literal, Optional
 
 @dataclass
 class AuthenticationSession:
     provider: str
     model: str
     auth_method: str
-    api_key: str
+    api_key: Optional[str]
 
 class Authenticator:
     """Handle authentication for supported LLM providers."""
@@ -16,7 +15,7 @@ class Authenticator:
         self.provider = provider
         self.auth_method = auth_method
         self.MODEL_LIST_URLS = {"deepseek": "https://api.deepseek.com/models",
-                                "openrouter": "https://openrouter.ai/api/v1/models"}
+                                "openrouter": "https://openrouter.ai/api/v1/models",}
     
     def fetch_models(self, api_key: str) -> list[str] | str:
         """Return model identifiers available from the authenticated provider."""
@@ -80,4 +79,8 @@ class Authenticator:
             return AuthenticationSession(self.provider, model, self.auth_method, api_key)
 
         elif self.auth_method.strip().lower() == "oauth":
-            pass
+            if not model:
+                return "Authentication failed: MODEL is required."
+            if self.provider == "OpenAI-codex" and "gpt" in model.strip().lower():
+                return AuthenticationSession(self.provider, model, self.auth_method, api_key=None)
+

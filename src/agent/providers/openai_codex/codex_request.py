@@ -11,10 +11,10 @@ CODEX_ENDPOINT = "https://chatgpt.com/backend-api/codex/responses"
 class CodexRequest:
     '''Serve requests using the openAI codex auth'''
      
-    def __init__(self) -> None:
-        self._generate_auth_token()
+    def __init__(self, model: str = "gpt-5.5") -> None:
+        self.model = model
     
-    def _generate_auth_token(self):
+    def _get_credentials(self):
         self.auth_token = fetch_credentials_for_request()
         self.access_token = self.auth_token.get("access_token")
         self.id_token = self.auth_token.get("id_token")
@@ -23,13 +23,15 @@ class CodexRequest:
     
     def generate_response(self, user_input: str):
         
+        self._get_credentials()
+
         if isinstance(self.id_token,str):
-            self.claims = jwt.decode(
+            claims = jwt.decode(
                 self.id_token,
                 options={"verify_signature": False}
             )
-        self.user_name = self.claims["name"]
-        self.chatgpt_account_id = self.claims["https://api.openai.com/auth"]["chatgpt_account_id"]
+        self.user_name = claims["name"]
+        self.chatgpt_account_id = claims["https://api.openai.com/auth"]["chatgpt_account_id"]
 
         headers = {
             "Authorization":f"Bearer {self.access_token}",
@@ -37,9 +39,10 @@ class CodexRequest:
             "originator":"GlassBox",
             "User-Agent":"Glassbox/0.1.0",
             "Content-Type": "application/json",
+            "Accept": "text/event-stream",
         }
         payload = {
-        "model": "gpt-5.5",  # Replace with your intended Codex-supported model
+        "model": self.model,  # Replace with your intended Codex-supported model
         "input": [
             {
                 "type": "message",
@@ -47,7 +50,7 @@ class CodexRequest:
                 "content": [
                     {
                         "type": "input_text",
-                        "text":f"{user_input.strip()}",
+                        "text": user_input.strip(),
                     }
                 ],
             }
