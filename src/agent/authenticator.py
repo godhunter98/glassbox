@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from typing import Literal, Optional
+from agent.providers.providers import SUPPORTED_PROVIDERS, SUPPORTED_MODELS
 
 @dataclass
 class AuthenticationSession:
@@ -12,11 +13,11 @@ class Authenticator:
     """Handle authentication for supported LLM providers."""
 
     def __init__(self, provider: str, auth_method: Literal["Oauth", "api_key"]) -> None:
-        self.provider = provider
+        self.provider = provider.strip().casefold()
         self.auth_method = auth_method
         self.MODEL_LIST_URLS = {"deepseek": "https://api.deepseek.com/models",
                                 "openrouter": "https://openrouter.ai/api/v1/models",}
-    
+
     def fetch_models(self, api_key: str) -> list[str] | str:
         """Return model identifiers available from the authenticated provider."""
         endpoint = self.MODEL_LIST_URLS.get(self.provider.lower())
@@ -78,9 +79,25 @@ class Authenticator:
 
             return AuthenticationSession(self.provider, model, self.auth_method, api_key)
 
-        elif self.auth_method.strip().lower() == "oauth":
+        if self.auth_method.strip().lower() == "oauth":
+            if self.provider not in SUPPORTED_PROVIDERS:
+                return f"Provider '{self.provider}' is not supported."
             if not model:
                 return "Authentication failed: MODEL is required."
-            if self.provider == "OpenAI-codex" and "gpt" in model.strip().lower():
-                return AuthenticationSession(self.provider, model, self.auth_method, api_key=None)
+            if model not in SUPPORTED_MODELS.get(self.provider.casefold(), []):
+                return f"Model '{model}' is not supported for provider '{self.provider}'."
+            if self.provider != "openai":
+                return f"OAuth authentication is not supported for provider '{self.provider}'."
 
+            try:
+                from agent.providers.openai_codex.codex_auth import fetch_credentials_for_request
+
+                # This loads valid stored credentials, refreshes them when needed,
+                # or starts the browser login flow when no credentials exist.
+                fetch_credentials_for_request()
+            except Exception as error:
+                return f"OAuth authentication failed: {error}"
+
+            return AuthenticationSession(self.provider, model, self.auth_method, api_key=None)
+
+        return f"Authentication method '{self.auth_method}' is not supported."

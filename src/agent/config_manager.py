@@ -3,21 +3,21 @@
 import os
 import sys
 from pathlib import Path
+from typing import Literal
 
 
 from dotenv import load_dotenv
 
 from agent.authenticator import AuthenticationSession, Authenticator
+from agent.providers.providers import PROVIDER_LABELS, SUPPORTED_MODELS
 
-
-SUPPORTED_PROVIDERS = ("deepseek", "openrouter", "OpenAI")
-# LOGIN_CHOICES = ("Sign with an API_KEY","Sign in with your ")
 
 class ConfigManager:
     """Create authenticated provider sessions from saved or interactive settings."""
 
     def __init__(self, env_path: Path | None = None) -> None:
         self.env_path = env_path or Path.cwd() / ".env"
+        self.auth_method = ""
 
     def get_session(self) -> AuthenticationSession | None:
         """Load a saved configuration, prompting only when it is incomplete."""
@@ -39,7 +39,7 @@ class ConfigManager:
             print("Configuration requires an interactive terminal.")
             return None
 
-        return self._configure("", "", "", "","")
+        return self._configure("", "", "", "")
 
     def _configure(
         self,
@@ -47,37 +47,44 @@ class ConfigManager:
         model: str,
         api_key: str | None,
         api_base: str,
-        auth_method: str,
     ) -> AuthenticationSession | None:
         print("GlassBox configuration\n")
         import questionary
         if not provider:
             provider = questionary.select(
                 "Select a provider:",
-                choices=SUPPORTED_PROVIDERS,
+                choices=[
+                    questionary.Choice(title=label, value=provider_id)
+                    for provider_id, label in PROVIDER_LABELS.items()
+                ],
                 qmark="🤖",
             ).ask()
-            if not auth_method:
-                if provider.lower() == "openai":
-                    choices = [" 1. Use an API key"," 2. Use a ChatGPT Plus/Pro account (Codex)"]
-                selected_method = questionary.select(
-                                "How would you like to authenticate?",
-                                choices=choices,
-                                qmark="\n🔐",
-                            ).ask()
-                auth_method = "Oauth" if selected_method == choices[1] else "api_key"
+            if not self.auth_method:
+                if provider == "openai":
+                    choices = [" 1. Use an API key", " 2. Use a ChatGPT Plus/Pro account (Codex)"]
+                    selected_method = questionary.select(
+                        "How would you like to authenticate?",
+                        choices=choices,
+                        qmark="\n🔐",
+                    ).ask()
+                    self.auth_method = "Oauth" if selected_method == choices[1] else "api_key"
+                else:
+                    self.auth_method = "api_key"
 
-        if not api_key and auth_method!= "Oauth" :
+        if not api_key and self.auth_method!= "Oauth" :
             api_key = (questionary.password(f"{provider} API key:", qmark="🔑").ask() or "").strip()
             if not api_key:
                 print("API key is required to start GlassBox.")
                 return None
 
         if not model:
-            models = Authenticator(provider, "api_key").fetch_models(api_key)
-            if isinstance(models, str):
-                print(models)
-                return None
+            if self.auth_method != "Oauth":
+                models = Authenticator(provider, "api_key").fetch_models(api_key)
+                if isinstance(models, str):
+                    print(models)
+                    return None
+            else:
+                models = SUPPORTED_MODELS.get(provider, [])
 
             model = questionary.select(
                 "Select a model:",
@@ -116,7 +123,7 @@ class ConfigManager:
         if not save_model:
             os.environ.pop("MODEL", None)
 
-        return self._authenticate(provider, model, api_key)
+        return self._authenticate(provider, model, api_key, self.auth_method)
 
     def _load_values(self) -> tuple[str, str, str, str]:
         return (
@@ -126,14 +133,15 @@ class ConfigManager:
             os.getenv("API_BASE", "").strip(),
         )
 
-    def _authenticate(self, provider: str, model: str, api_key: str) -> AuthenticationSession | None:
-        result = Authenticator(provider, "api_key").authenticate(model, api_key)
-        if isinstance(result, AuthenticationSession):
-            return result
+    def _authenticate(self, provider: str, model: str, api_key: str | None, auth_method: Literal["Oauth", "api_key"]) -> AuthenticationSession | None:
+            result = Authenticator(provider, auth_method).authenticate(model, api_key, )
+            if isinstance(result, AuthenticationSession):
+                return result
 
-        if isinstance(result, str):
-            print(result)
-        return None
+            if isinstance(result, str):
+                print(result)
+            return None
+
 
     def _save_values(self, values: dict[str, str], *, remove_model: bool) -> None:
         existing_lines = self.env_path.read_text(encoding="utf-8").splitlines() if self.env_path.exists() else []
