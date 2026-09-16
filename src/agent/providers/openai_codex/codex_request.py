@@ -10,19 +10,30 @@ CODEX_ENDPOINT = "https://chatgpt.com/backend-api/codex/responses"
 
 class CodexRequest:
     '''Serve requests using the openAI codex auth'''
-     
+
     def __init__(self, model: str = "gpt-5.5") -> None:
         self.model = model
-    
+
     def _get_credentials(self):
         self.auth_token = fetch_credentials_for_request()
         self.access_token = self.auth_token.get("access_token")
         self.id_token = self.auth_token.get("id_token")
         if not self.id_token or not self.access_token:
             raise RuntimeError("Missing Codex authentication tokens")
-    
+
+    @staticmethod
+    def conversation_to_codex_input(
+        conversation: list[dict[str, str]]
+    ) -> str:
+        return "".join(
+            f"{message["role"]}: {message["content"]} "
+            for message in conversation
+            if message.get("role") in {"system", "user", "assistant"}
+            and message.get("content")
+        )
+
     def generate_response(self, user_input: str):
-        
+
         self._get_credentials()
 
         if isinstance(self.id_token,str):
@@ -56,7 +67,7 @@ class CodexRequest:
             }
         ],
         "stream": True, #codex backend does not allow us to use non-streaming responses
-        "store":False 
+        "store":False
         }
         response = requests.post(
             CODEX_ENDPOINT,

@@ -39,9 +39,12 @@ from agent.ui import (
     ERROR_ICON,
 )
 from agent.context_manager import truncate_tool_output, mask_old_observations, Session_state , prune_conversation
+from agent.providers.openai_codex.codex_request import CodexRequest
+
 from contextlib import nullcontext
-import io
 from contextlib import redirect_stdout, redirect_stderr
+
+import io
 import sys
 
 DEEPSEEK_MAX_CONTEXT = 1_000_000
@@ -80,30 +83,30 @@ def get_api_base() -> str | None:
 def load_conversation(conversation_id: int) -> List[Dict[str, Any]]:
     # Start with the standard system prompt
     conversation = [{"role": "system", "content": SYSTEM_PROMPT}]
-    
+
     # Retrieve all user & assistant messages, ordered chronologically
     db_messages = queries.get_conversation_messages(conversation_id)
-    
+
     for msg in db_messages:
         role = msg["role"]
-        
+
         if role == "user":
             conversation.append({"role": "user", "content": msg["content"]})
-            
+
         elif role == "assistant":
             # Fetch any tool calls associated with this assistant message
             tool_calls = queries.get_tool_calls_for_message(msg["message_id"])
-            
+
             if not tool_calls:
                 conversation.append({"role": "assistant", "content": msg["content"]})
             else:
                 # 1. Reconstruct the tool_calls property for the assistant message
                 tc_list = []
                 tool_msgs = []
-                
+
                 for tc in tool_calls:
                     call_id = f"call_{tc['tool_id']}"
-                    
+
                     tc_list.append({
                         "id": call_id,
                         "type": "function",
@@ -112,7 +115,7 @@ def load_conversation(conversation_id: int) -> List[Dict[str, Any]]:
                             "arguments": tc["tool_args"]
                         }
                     })
-                    
+
                     # 2. Prepare the matching 'tool' role message
                     tool_msgs.append({
                         "role": "tool",
@@ -120,39 +123,39 @@ def load_conversation(conversation_id: int) -> List[Dict[str, Any]]:
                         "name": tc["tool_name"],
                         "content": truncate_tool_output(tc["tool_output"],tc["tool_name"])
                     })
-                
+
                 conversation.append({
                     "role": "assistant",
                     "content": msg["content"],
                     "tool_calls": tc_list
                 })
                 conversation.extend(tool_msgs)
-                
+
     return conversation
 
 
 def print_conversation_history(conversation: List[Dict[str, Any]]):
     print(f"\n{INFO_COLOR}=== Resuming Conversation History ==={RESET_COLOR}")
-    
+
     i = 0
     while i < len(conversation):
         msg = conversation[i]
         role = msg["role"]
-        
+
         if role == "system":
             i += 1
             continue
-            
+
         if role == "user":
             print(f"\n{YOU_COLOR}You:{RESET_COLOR} {msg['content']}")
             i += 1
             continue
-            
+
         if role == "assistant":
             print(f"\n{ASSISTANT_COLOR}Assistant:{RESET_COLOR}")
             if msg.get("content"):
                 rprint(Markdown(msg["content"]))
-                
+
             tool_calls = msg.get("tool_calls", [])
             if tool_calls:
                 print(f"{TOOL_COLOR}🔄 Executed {len(tool_calls)} tool{'s' if len(tool_calls) > 1 else ''}...{RESET_COLOR}")
@@ -165,7 +168,7 @@ def print_conversation_history(conversation: List[Dict[str, Any]]):
                     except Exception:
                         args_display = func["arguments"]
                     print(f"  {idx}. {TOOL_ICON} {func['name']}({args_display})")
-                    
+
                     # Find matching tool response to print success/error indicator
                     for j in range(i + 1, len(conversation)):
                         candidate = conversation[j]
@@ -181,12 +184,12 @@ def print_conversation_history(conversation: List[Dict[str, Any]]):
                             break
             i += 1
             continue
-            
+
         if role == "tool":
             # Tool responses are inline under the assistant message, so we skip them here
             i += 1
             continue
-            
+
     print(f"\n{INFO_COLOR}======================================{RESET_COLOR}\n")
 
 
@@ -194,14 +197,22 @@ def print_error(context: str, message: str) -> None:
     print(f"{ERROR_COLOR}{ERROR_ICON} {context}: {message}{RESET_COLOR}")
 
 
-def llm_completions(conversation: List[Dict[str, str]], model: str, api_key: str,spinner:Spinner=None,show_ttft=True,quiet:bool=False):
+def llm_completions(conversation: List[Dict[str, str]], session: AuthenticationSession, spinner: Spinner = None, show_ttft=True, quiet: bool = False):
     from litellm import litellm
 
     messages = conversation.copy()
-    if model and api_key is not None:
+
+    if session.provider == "openai" and session.auth_method == "oauth":
+        if spinner:
+            spinner.stop()
+        all_messages = CodexRequest.conversation_to_codex_input(messages)
+        text = CodexRequest(session.model).generate_response(user_input = all_messages)
+        return text, None, None, None
+
+    if session.model and session.api_key is not None:
         kwargs = {
-            "model": model,
-            "api_key": api_key,
+            "model": session.model,
+            "api_key": session.api_key,
             "messages": messages,
             "max_tokens": 20_000,
             "temperature": 0.1,
@@ -214,7 +225,7 @@ def llm_completions(conversation: List[Dict[str, str]], model: str, api_key: str
         api_base = get_api_base()
         if api_base:
             kwargs["api_base"] = api_base
-            
+
         for attempt in range(3):
             try:
                 response = litellm.completion(**kwargs)
@@ -227,11 +238,11 @@ def llm_completions(conversation: List[Dict[str, str]], model: str, api_key: str
                 if spinner:
                     spinner.stop()
                     spinner = None
-                
-                
+
+
                 if not quiet:
                     print(f"{ASSISTANT_COLOR}Assistant:{RESET_COLOR}")
-                
+
                 accumulated_text = ""
 
                 last_render_time = 0
@@ -256,8 +267,8 @@ def llm_completions(conversation: List[Dict[str, str]], model: str, api_key: str
                                 now = time.monotonic()
                                 if now-last_render_time >= RENDER_INTERVAL:
                                     live.update(Markdown(accumulated_text))
-                                    last_render_time = now 
-                                    
+                                    last_render_time = now
+
                         chunks.append(chunk)
                     if use_live:
                         live.update(Markdown(accumulated_text))
@@ -278,7 +289,7 @@ def llm_completions(conversation: List[Dict[str, str]], model: str, api_key: str
                     bar_width = 30
                     filled = int(bar_width * pct)
                     empty = bar_width - filled
-                    
+
                     # Color based on thresholds: green → yellow → red
                     if prompt_tokens > HARD_LIMIT:
                         bar_color = "\u001b[91m"   # Red
@@ -286,7 +297,7 @@ def llm_completions(conversation: List[Dict[str, str]], model: str, api_key: str
                         bar_color = "\u001b[93m"   # Yellow
                     else:
                         bar_color = "\u001b[92m"   # Green
-                    
+
                     bar = f"{bar_color}{'█' * filled}{'░' * empty}{RESET_COLOR}"
                     if not quiet:
                         print(f"  Context: [{bar}] {prompt_tokens:,} / {DEEPSEEK_MAX_CONTEXT:,} ({pct:.1%})")
@@ -303,7 +314,7 @@ def llm_completions(conversation: List[Dict[str, str]], model: str, api_key: str
                             print(f"{INFO_COLOR}  [ {tps:.1f} toks/s | {completion_tokens} tokens in {duration:.2f}s | Thinking_Mode 🧠 : ✅ ]{RESET_COLOR}\n")
 
                 return full_response, prompt_tokens, total_tokens, completion_tokens
-                
+
             except Exception as e:
                 last_error = e
                 delay = 2**attempt
@@ -319,7 +330,7 @@ def llm_completions(conversation: List[Dict[str, str]], model: str, api_key: str
             )
             print(f"{INFO_COLOR}Current model: {model}{RESET_COLOR}")
         return f"I encountered an error: {error_msg}. Please check your API key configuration.", None, None, None
-    
+
     else:
         error_msg = "Missing environment variable: MODEL or API_KEY"
         if not quiet:
@@ -342,7 +353,7 @@ def run_tool_call(
             print(f"  {index}. {TOOL_ICON} {tool_name}({args_display})")
 
         tool = tool_registry.get(tool_name)
-        
+
         # error handling if tool doesn't exist
         if not tool:
             error_msg = f"Unknown tool: {tool_name}"
@@ -369,7 +380,7 @@ def run_tool_call(
                 path = tool_args.get("path") or tool_args.get("filename")
                 if path:
                     session_state.record_file(path)
-                
+
             # tool args and tool resp are dicts, but sqlite needs a string, we dump them!
             if not quiet:
                 queries.add_tool_call(db_msg_id,tool_name,json.dumps(tool_args),json.dumps(resp))
@@ -415,7 +426,7 @@ def handle_assistant_message(assistant_message, conversation: List[Dict[str, Any
         if reasoning_content is not None:
             msg["reasoning_content"] = reasoning_content
         conversation.append(msg)
-        return 
+        return
 
     # Preserve the model's assistant message before executing any tool calls.
     msg = {
@@ -423,7 +434,7 @@ def handle_assistant_message(assistant_message, conversation: List[Dict[str, Any
         "content": content,
         "tool_calls": tool_calls,
     }
-    
+
     if reasoning_content is not None:
         msg["reasoning_content"] = reasoning_content
     conversation.append(msg)
@@ -443,7 +454,7 @@ def generate_conversation_summary(conversation: List[Dict[str,Any]],model:str,ap
 
     '''Generate a summary from the completed conversation.'''
     print(f"\n{INFO_COLOR}Saving conversation...{RESET_COLOR}")
-    
+
     # Build a lightweight summary request — only the conversation content matters,
     # not the original system prompt, so we replace it with a summary-specific one.
     summary_messages = [
@@ -508,70 +519,71 @@ def generate_conversation_summary(conversation: List[Dict[str,Any]],model:str,ap
 
 def refresh_session_state(
     conversation: List[Dict],
-    model: str,
-    api_key: str,
+    auth_session: AuthenticationSession,
     session_state: Session_state,
 ) -> bool:
-    from litellm import litellm
+    if auth_session.auth_method == "api_key":
 
-    instruction = [
-        {
-            "role": "system",
-            "content": (
-                '''You're a specialised agent who's job is to look at the conversation between a user
-                and an agent and generate structured JSON in the below format.
-                {"goal":"...",
-                "next_steps":[],
-                "decisions":[]
-                }
-                The conversation may contain tool calls and their results or past session state objects as well, 
-                your job is to absorb everything and generate the above mentioned dict with 3 items.
-                '''
-            ),
-        },
-    ]
-    messages = instruction + [{
-    "role":msg["role"], "content":msg["content"]}
-    for msg in conversation
-    if msg["role"] in ("user","assistant") and msg.get("content")
-    ]
-    kwargs = {
-        "model": model,
-        "api_key": api_key,
-        "messages": messages,
-        "max_tokens": 2_000,
-        "temperature": 0.2,
-        "stream": False,
-        "response_format":{"type": "json_object"} ,
-        "extra_body":{"thinking": {"type": "disabled"}}
-    }
+        from litellm import litellm
 
-    
-    try:
-        response = litellm.completion(**kwargs)
-        content = response.choices[0].message.content
-        if not content:                       # DeepSeek empty-content case
-            return False
-        
+        instruction = [
+            {
+                "role": "system",
+                "content": (
+                    '''You're a specialised agent who's job is to look at the conversation between a user
+                    and an agent and generate structured JSON in the below format.
+                    {"goal":"...",
+                    "next_steps":[],
+                    "decisions":[]
+                    }
+                    The conversation may contain tool calls and their results or past session state objects as well,
+                    your job is to absorb everything and generate the above mentioned dict with 3 items.
+                    '''
+                ),
+            },
+        ]
+        messages = instruction + [{
+        "role":msg["role"], "content":msg["content"]}
+        for msg in conversation
+        if msg["role"] in ("user","assistant") and msg.get("content")
+        ]
+        kwargs = {
+            "model": auth_session.model,
+            "api_key": auth_session.api_key,
+            "messages": messages,
+            "max_tokens": 2_000,
+            "temperature": 0.2,
+            "stream": False,
+            "response_format":{"type": "json_object"} ,
+            "extra_body":{"thinking": {"type": "disabled"}}
+        }
+
+
         try:
-            state_dict = json.loads(content)
-        except json.JSONDecodeError:
+            response = litellm.completion(**kwargs)
+            content = response.choices[0].message.content
+            if not content:                       # DeepSeek empty-content case
+                return False
+
+            try:
+                state_dict = json.loads(content)
+            except json.JSONDecodeError:
+                return False
+
+            session_state.refresh_reasoning(
+                    goal=state_dict.get("goal", session_state.goal),
+                    decisions=state_dict.get("decisions", []),
+                    next_steps=state_dict.get("next_steps", []),
+                )
+            return True
+
+        except Exception as e:
+            print(f"Error creating state object: {e}")
             return False
-
-        session_state.refresh_reasoning(
-                goal=state_dict.get("goal", session_state.goal),
-                decisions=state_dict.get("decisions", []),
-                next_steps=state_dict.get("next_steps", []),
-            )
-        return True
-
-    except Exception as e:
-        print(f"Error creating state object: {e}")
-        return False
 
 def agent_loop(session: AuthenticationSession, max_iterations: int = 15, resume_id: int | None = None, evalmode:bool = False, agent_input:str | None = None):
     quiet = evalmode
-    
+
     # for managing the user input
     command_runner = CommandRunner()
     prompt_session = PromptSession(
@@ -615,7 +627,7 @@ def agent_loop(session: AuthenticationSession, max_iterations: int = 15, resume_
     last_state_refresh_tokens = 0
 
     try:
-        while True:   
+        while True:
             if not evalmode:
                 try:
                     user_input = prompt_session.prompt(
@@ -639,7 +651,7 @@ def agent_loop(session: AuthenticationSession, max_iterations: int = 15, resume_
                         import questionary
 
                         print(f"{INFO_COLOR}Fetching available models...{RESET_COLOR}")
-                        models = Authenticator(session.provider, "api_key").fetch_models(session.api_key)
+                        models = Authenticator(session.provider, session.auth_method).fetch_models(session.api_key)
                         if isinstance(models, str):
                             print_error("Model error", models)
                             continue
@@ -654,7 +666,7 @@ def agent_loop(session: AuthenticationSession, max_iterations: int = 15, resume_
                             queries.update_conversation_model(conv_row_id, updated_model)
                             print(f"{SUCCESS_COLOR}{SUCCESS_ICON} Using model: {updated_model}{RESET_COLOR}")
                     continue
-            
+
             else:
                 user_input = agent_input
 
@@ -671,8 +683,8 @@ def agent_loop(session: AuthenticationSession, max_iterations: int = 15, resume_
             while current_iteration<=max_iterations:
                 current_iteration+=1
 
-                response, prompt_tokens, total_tokens,completion_tokens = llm_completions(conversation, session.model, session.api_key,spinner=spinner,show_ttft=show_ttft,quiet=quiet)
-                
+                response, prompt_tokens, total_tokens,completion_tokens = llm_completions(conversation, session, spinner=spinner,show_ttft=show_ttft,quiet=quiet)
+
                 if total_tokens is not None and not evalmode:
                     session_total_tokens += total_tokens
                     usage = getattr(response, "usage", None)
@@ -704,7 +716,7 @@ def agent_loop(session: AuthenticationSession, max_iterations: int = 15, resume_
                         assistant_message = response.choices[0].message  # type: ignore
                         # The response is being generated by the assistant, depending on whether there are tool calls or not.
                         handle_assistant_message(assistant_message, conversation, conv_row_id, session_state, quiet)
-                        
+
                         if not assistant_message.tool_calls:
                             if prompt_tokens is not None and prompt_tokens - last_state_refresh_tokens >= STATE_INJECT_GROWTH and not evalmode:
                                 refreshed = refresh_session_state(
@@ -721,8 +733,8 @@ def agent_loop(session: AuthenticationSession, max_iterations: int = 15, resume_
                                     last_state_refresh_tokens = prompt_tokens
                             if evalmode:
                                 return assistant_message.content or ""
-                            break 
-                                                 
+                            break
+
 
                         # Follow a laddered approach, if masking old observations is not enough, prune
                         if prompt_tokens is not None and prompt_tokens > CONTEXT_LIMIT and not evalmode:
@@ -747,7 +759,7 @@ def agent_loop(session: AuthenticationSession, max_iterations: int = 15, resume_
                                 })
                                 last_state_refresh_tokens = prompt_tokens
                         spinner.start() if spinner else None
-                        continue                                     
+                        continue
 
                     else:
                         # Fallback for unexpected response format
@@ -758,7 +770,7 @@ def agent_loop(session: AuthenticationSession, max_iterations: int = 15, resume_
                         if evalmode:
                             return content
                         break
-                
+
                 except Exception as e:
                     if not evalmode:
                         print(
@@ -770,10 +782,10 @@ def agent_loop(session: AuthenticationSession, max_iterations: int = 15, resume_
                     break
             if evalmode:
                 return ""
-            
+
     except KeyboardInterrupt:
         print()
-    
+
     # Always generate summary and mark completed on exit
     if not evalmode:
         try:
@@ -781,7 +793,7 @@ def agent_loop(session: AuthenticationSession, max_iterations: int = 15, resume_
         except (KeyboardInterrupt, Exception) as e:
             print(f"\n{INFO_COLOR}Summary skipped ({type(e).__name__}){RESET_COLOR}")
             conv_summary = "Untitled session"
-        
+
 
         queries.mark_conversation_completed(conv_row_id, conv_summary)
         print(f"\n{INFO_COLOR}Goodbye! 👋{RESET_COLOR}")

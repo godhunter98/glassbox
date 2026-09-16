@@ -24,6 +24,9 @@ class ConfigManager:
         load_dotenv()
         provider, self.auth_method, model, api_key, api_base = self._load_values()
 
+        if provider and model and self.auth_method == "oauth":
+               return self._authenticate(provider, model, None, "oauth")
+
         if provider and model and api_key:
             return AuthenticationSession(provider, model, "api_key", api_key)
 
