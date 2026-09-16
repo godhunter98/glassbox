@@ -24,6 +24,7 @@ from agent.tools import (
     get_tool_schema,
     tool_registry
 )
+
 from agent.prompts import SYSTEM_PROMPT
 from agent.animation import Spinner
 from agent.ui import (
