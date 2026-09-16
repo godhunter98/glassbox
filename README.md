@@ -1,6 +1,8 @@
 # GlassBox 🔍
 
-A local, transparent CLI coding assistant powered by LLMs via [LiteLLM](https://github.com/BerriAI/litellm).
+A local, transparent CLI coding harness.
+
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/godhunter98/glassbox)
 
 <img width="1536" height="1024" alt="image" src="https://github.com/user-attachments/assets/7e874f02-f69b-4045-8ba3-351b3c38aaac" />
 
