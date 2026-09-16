@@ -22,10 +22,13 @@ class ConfigManager:
     def get_session(self) -> AuthenticationSession | None:
         """Load a saved configuration, prompting only when it is incomplete."""
         load_dotenv()
-        provider, model, api_key, api_base = self._load_values()
+        provider, self.auth_method, model, api_key, api_base = self._load_values()
 
         if provider and model and api_key:
             return AuthenticationSession(provider, model, "api_key", api_key)
+
+        if provider and model and self.auth_method == "oauth":
+            return AuthenticationSession(provider, model, "oauth", None)
 
         if not sys.stdin.isatty():
             print("Missing API configuration. Create a .env file or run GlassBox interactively to configure it.")
@@ -67,24 +70,21 @@ class ConfigManager:
                         choices=choices,
                         qmark="\n🔐",
                     ).ask()
-                    self.auth_method = "Oauth" if selected_method == choices[1] else "api_key"
+                    self.auth_method = "oauth" if selected_method == choices[1] else "api_key"
                 else:
                     self.auth_method = "api_key"
 
-        if not api_key and self.auth_method!= "Oauth" :
+        if not api_key and self.auth_method!= "oauth" :
             api_key = (questionary.password(f"{provider} API key:", qmark="🔑").ask() or "").strip()
             if not api_key:
                 print("API key is required to start GlassBox.")
                 return None
 
         if not model:
-            if self.auth_method != "Oauth":
-                models = Authenticator(provider, "api_key").fetch_models(api_key)
-                if isinstance(models, str):
-                    print(models)
-                    return None
-            else:
-                models = SUPPORTED_MODELS.get(provider, [])
+            models = Authenticator(provider, self.auth_method).fetch_models(api_key if self.auth_method == "api_key" else None)
+            if isinstance(models, str):
+                print(models)
+                return None
 
             model = questionary.select(
                 "Select a model:",
@@ -106,7 +106,7 @@ class ConfigManager:
         if not api_base:
             api_base = input("API base URL (optional): ").strip()
 
-        values = {"PROVIDER": provider, "API_KEY": api_key}
+        values = {"PROVIDER": provider, "API_KEY": api_key if self.auth_method == "api_key" else "", "AUTH_METHOD": self.auth_method}
         if save_model:
             values["MODEL"] = model
         if api_base:
@@ -125,15 +125,16 @@ class ConfigManager:
 
         return self._authenticate(provider, model, api_key, self.auth_method)
 
-    def _load_values(self) -> tuple[str, str, str, str]:
+    def _load_values(self) -> tuple[str, str, str, str, str]:
         return (
             os.getenv("PROVIDER", "").strip().lower(),
+            os.getenv("AUTH_METHOD", "").strip().lower(),
             os.getenv("MODEL", "").strip(),
             os.getenv("API_KEY", "").strip(),
             os.getenv("API_BASE", "").strip(),
         )
 
-    def _authenticate(self, provider: str, model: str, api_key: str | None, auth_method: Literal["Oauth", "api_key"]) -> AuthenticationSession | None:
+    def _authenticate(self, provider: str, model: str, api_key: str | None, auth_method: Literal["oauth", "api_key"]) -> AuthenticationSession | None:
             result = Authenticator(provider, auth_method).authenticate(model, api_key, )
             if isinstance(result, AuthenticationSession):
                 return result

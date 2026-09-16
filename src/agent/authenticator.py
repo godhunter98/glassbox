@@ -12,43 +12,50 @@ class AuthenticationSession:
 class Authenticator:
     """Handle authentication for supported LLM providers."""
 
-    def __init__(self, provider: str, auth_method: Literal["Oauth", "api_key"]) -> None:
+    def __init__(self, provider: str, auth_method: Literal["oauth", "api_key"]) -> None:
         self.provider = provider.strip().casefold()
         self.auth_method = auth_method
         self.MODEL_LIST_URLS = {"deepseek": "https://api.deepseek.com/models",
                                 "openrouter": "https://openrouter.ai/api/v1/models",}
 
-    def fetch_models(self, api_key: str) -> list[str] | str:
+    def fetch_models(self, api_key: str | None) -> list[str] | str:
         """Return model identifiers available from the authenticated provider."""
-        endpoint = self.MODEL_LIST_URLS.get(self.provider.lower())
-        if endpoint is None:
-            return f"Model discovery is not supported for provider '{self.provider}'."
+        if self.auth_method.strip().lower() == "api_key" and api_key is not None:
+            endpoint = self.MODEL_LIST_URLS.get(self.provider.lower())
+            if endpoint is None:
+                return f"Model discovery is not supported for provider '{self.provider}'."
 
-        try:
-            import requests
-            response = requests.get(
-                endpoint,
-                headers={"Authorization": f"Bearer {api_key}"},
-                timeout=15,
-            )
-            response.raise_for_status()
-            payload = response.json()
-        except requests.HTTPError as error:
-            status_code = error.response.status_code if error.response is not None else None
-            if status_code in (401, 403):
-                return "Authentication failed: the API key was rejected."
-            return f"Could not fetch models: provider returned HTTP {status_code}."
-        except requests.RequestException as error:
-            return f"Could not fetch models: network error ({error})."
-        except ValueError as error:
-            return f"Could not fetch models: {error}."
+            try:
+                import requests
+                response = requests.get(
+                    endpoint,
+                    headers={"Authorization": f"Bearer {api_key}"},
+                    timeout=15,
+                )
+                response.raise_for_status()
+                payload = response.json()
+            except requests.HTTPError as error:
+                status_code = error.response.status_code if error.response is not None else None
+                if status_code in (401, 403):
+                    return "Authentication failed: the API key was rejected."
+                return f"Could not fetch models: provider returned HTTP {status_code}."
+            except requests.RequestException as error:
+                return f"Could not fetch models: network error ({error})."
+            except ValueError as error:
+                return f"Could not fetch models: {error}."
 
-        model_ids = [item["id"] for item in payload.get("data", []) if item.get("id")]
-        if not model_ids:
-            return "No models were returned for this API key."
+            model_ids = [item["id"] for item in payload.get("data", []) if item.get("id")]
+            if not model_ids:
+                return "No models were returned for this API key."
 
-        prefix = self.provider.lower()
-        return [f"{prefix}/{model_id}" for model_id in model_ids]
+            prefix = self.provider.lower()
+            return [f"{prefix}/{model_id}" for model_id in model_ids]
+
+        else:
+            models = SUPPORTED_MODELS.get(self.provider)
+            if models is None:
+                return f"Model discovery is not supported for provider '{self.provider}'."
+            return models
 
     def authenticate(
         self,
