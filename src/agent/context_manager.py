@@ -54,8 +54,8 @@ class Session_state():
         else:
             entry["count"]+=1
             entry["last_error"] = error
-        
-        
+
+
     # periodic, model-driven (the non-deterministic fields)
     def refresh_reasoning(self, goal, decisions, next_steps):
         """Refreshes the model-driven reasoning fields in the session state.
@@ -73,7 +73,7 @@ class Session_state():
         for d in decisions:
             if d not in self.decisions:
                 self.decisions.append(d)
-    
+
     # the inject step — render to a compact block for the model
     def render(self) -> str:
         """Renders the current session state into a formatted summary string.
@@ -89,7 +89,7 @@ class Session_state():
         files = ", ".join(f"{path} ({n}x)" for path, n in self.files_touched.items())
         active_blockers = [
             f"{key} — {v['count']} attempts, last: {v['last_error']}"
-            for key, v in self.blockers.items() if v["count"] >= 2       
+            for key, v in self.blockers.items() if v["count"] >= 2
         ]
         next_steps = ', '.join(self.next_steps)
         recent_decisions = "Here's a list of 7 recent decisions: " + ', '.join(
@@ -103,7 +103,7 @@ class Session_state():
         f"Decisions: {recent_decisions}",
         f"Next Steps: {next_steps if next_steps else 'None'}"
         ]
-        
+
         return "\n".join(lines)
 
 
@@ -136,15 +136,15 @@ def mask_old_observations(conversation:list,keep_last_n:int=20):
         required_slice = tool_idx[:-keep_last_n]
     for i in required_slice:
         tool_message = conversation[i]
-        
+
         if tool_message.get("masked"):
             continue
-        
+
         tool_message_length = len(tool_message["content"])
         tool_message_name= tool_message["name"]
         if tool_message_length > 300:
             tool_message["content"] = f"[observation masked | tool={tool_message_name} | {tool_message_length} chars hidden]"
-            
+
             # flag to avoid idempotency
             tool_message["masked"] = True
 
@@ -172,7 +172,7 @@ def truncate_tool_output(content_str: str, tool_name: str) -> str:
         limit = 35_000
         if len(content_str) > limit:
             return content_str[:limit] + f"\n... [File content truncated: {len(content_str) - limit} characters omitted for context space] ..."
-            
+
     # 2. For bash executions, keep a moderate limit but keep the END of the output
     # (since stack traces and summaries are usually at the bottom)
     elif tool_name in ["run_bash_command", "run_existing_bash_script"]:
@@ -191,10 +191,10 @@ def truncate_tool_output(content_str: str, tool_name: str) -> str:
         limit = 5_000
         if len(content_str) > limit:
             return content_str[:limit] + f"\n... [Truncated {len(content_str) - limit} characters] ..."
-            
+
     return content_str
 
-def prune_conversation(conversation:List[Dict[str,Any]],preserve_last_n:int=3):
+def prune_conversation(conversation: list[dict[str,Any]], preserve_last_n: int=3):
     """Prunes older messages from the conversation history to manage context window constraints.
 
     .. note::
@@ -203,20 +203,20 @@ def prune_conversation(conversation:List[Dict[str,Any]],preserve_last_n:int=3):
     Args:
         conversation (List[Dict[str, Any]]): The conversation history to be pruned.
     """
-       
+
     groups = []
     current_group = []
     for index,exchange in enumerate(conversation):
         if exchange["role"] == "system" or exchange["role"] == "user":
             if len(current_group) > 0:
-                groups.append(current_group)     
+                groups.append(current_group)
             current_group = [index]
         else:
             current_group.append(index)
     if current_group:
         groups.append(current_group)
 
-    if len(groups) > preserve_last_n +2:        
+    if len(groups) > preserve_last_n +2:
         kept_conversation = []
         kept_groups = groups[:2] + groups[-preserve_last_n:]
         # flattening these lists of lists into kept_conversation via double looping
@@ -224,25 +224,25 @@ def prune_conversation(conversation:List[Dict[str,Any]],preserve_last_n:int=3):
             for indice in group:
                 kept_conversation.append(conversation[indice])
         conversation[:] = kept_conversation
-        return conversation        
+        return conversation
 
 if __name__ == "__main__":
     print("--- Running context_manager.py Tests ---")
-    
+
     # 1. Test Session_state
     print("\n1. Testing Session_state:")
     state = Session_state(goal="Refactor code structure")
-    
+
     # Record files touched
     state.record_file("src/agent/coding_agent.py")
     state.record_file("src/agent/context_manager.py")
     state.record_file("src/agent/coding_agent.py")  # Record again to verify increment
-    
+
     # Record blockers
     state.record_blocker("read_file", {"path": "non_existent.py"}, "FileNotFoundError: No such file")
     state.record_blocker("run_bash_command", {"command": "pytest"}, "Exit code 1: 3 tests failed")
     state.record_blocker("read_file", {"path": "non_existent.py"}, "FileNotFoundError: Still not found") # Same tool & args
-    
+
     print("Goal:", state.goal)
     print("Files touched (expected 'coding_agent.py': 2, 'context_manager.py': 1):")
     print(" ", state.files_touched)
@@ -261,11 +261,11 @@ if __name__ == "__main__":
         {"role": "tool", "tool_call_id": "call_2", "name": "run_bash_command", "content": "output\n" * 100}, # Length > 300
         {"role": "user", "content": "Done"}
     ]
-    
+
     print("Original conversation length:", len(dummy_convo))
     # Keep only the last 1 tool message unmasked
     mask_old_observations(dummy_convo, keep_last_n=1)
-    
+
     print("After masking (keep_last_n=1):")
     for msg in dummy_convo:
         if msg["role"] == "tool":
@@ -275,10 +275,10 @@ if __name__ == "__main__":
     print("\n3. Testing truncate_tool_output:")
     long_read = "abc\n" * 10000  # 40000 chars
     long_bash = "line\n" * 3000   # 15000 chars
-    
+
     truncated_read = truncate_tool_output(long_read, "read_file")
     truncated_bash = truncate_tool_output(long_bash, "run_bash_command")
-    
+
     print(f"  read_file output size: {len(long_read)} -> {len(truncated_read)}")
     print(f"  run_bash_command output size: {len(long_bash)} -> {len(truncated_bash)}")
     print("  First line of truncated bash:", truncated_bash.splitlines()[0])
@@ -308,9 +308,9 @@ if __name__ == "__main__":
 
     print(f"  Before pruning: {len(prune_convo)} messages")
     print(f"  Messages: {[m['content'][:30] for m in prune_convo]}")
-    
+
     prune_conversation(prune_convo, preserve_last_n=2)
-    
+
     print(f"\n  After pruning (preserve_last_n=2): {len(prune_convo)} messages")
     print(f"  Surviving messages:")
     for msg in prune_convo:

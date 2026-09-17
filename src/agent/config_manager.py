@@ -30,9 +30,6 @@ class ConfigManager:
         if provider and model and api_key:
             return AuthenticationSession(provider, model, "api_key", api_key)
 
-        if provider and model and self.auth_method == "oauth":
-            return AuthenticationSession(provider, model, "oauth", None)
-
         if not sys.stdin.isatty():
             print("Missing API configuration. Create a .env file or run GlassBox interactively to configure it.")
             return None

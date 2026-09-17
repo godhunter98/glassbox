@@ -198,7 +198,7 @@ def print_error(context: str, message: str) -> None:
     print(f"{ERROR_COLOR}{ERROR_ICON} {context}: {message}{RESET_COLOR}")
 
 
-def llm_completions(conversation: List[Dict[str, str]], session: AuthenticationSession, spinner: Spinner = None, show_ttft=True, quiet: bool = False):
+def llm_completions(conversation: list[dict[str, str]], session: AuthenticationSession, spinner: Spinner = None, show_ttft=True, quiet: bool = False):
     from litellm import litellm
 
     messages = conversation.copy()
@@ -217,7 +217,7 @@ def llm_completions(conversation: List[Dict[str, str]], session: AuthenticationS
             "messages": messages,
             "max_tokens": 20_000,
             "temperature": 0.1,
-            "tools": get_tool_schema(model),
+            "tools": get_tool_schema(session.model),
             "stream":True,
             "extra_body":{"thinking": {"type": "disabled"}}
         }
@@ -412,7 +412,7 @@ def run_tool_call(
         if not quiet:
             print("The model sent back a broken JSON string!")
 
-def handle_assistant_message(assistant_message, conversation: List[Dict[str, Any]],conversation_id: int,session_state:Session_state,quiet:bool = False) -> None:
+def handle_assistant_message(assistant_message, conversation: list[dict[str, Any]],conversation_id: int,session_state:Session_state,quiet:bool = False) -> None:
     content = getattr(assistant_message, "content", "") or ""
     tool_calls = getattr(assistant_message, "tool_calls", None) or []
     # Capture reasoning_content if present (DeepSeek thinking mode)
@@ -450,7 +450,7 @@ def handle_assistant_message(assistant_message, conversation: List[Dict[str, Any
 
 
 
-def generate_conversation_summary(conversation: List[Dict[str,Any]],model:str,api_key:str) -> str:
+def generate_conversation_summary(conversation: list[dict[str,Any]],model:str,api_key:str) -> str:
     from litellm import litellm
 
     '''Generate a summary from the completed conversation.'''
@@ -519,10 +519,10 @@ def generate_conversation_summary(conversation: List[Dict[str,Any]],model:str,ap
         return "Summary could not be generated."
 
 def refresh_session_state(
-    conversation: List[Dict],
+    conversation: list[dict],
     auth_session: AuthenticationSession,
     session_state: Session_state,
-) -> bool:
+) -> bool | None:
     if auth_session.auth_method == "api_key":
 
         from litellm import litellm
@@ -704,6 +704,8 @@ def agent_loop(session: AuthenticationSession, max_iterations: int = 15, resume_
                 if isinstance(response, str):
                     if not evalmode:
                         print(f"{ASSISTANT_COLOR}Assistant:{RESET_COLOR} {response}")
+                        conversation.append({"role": "assistant", "content": response})
+                        queries.add_message(conv_row_id, "assistant", response)
                         break
                     elif evalmode:
                         return response
