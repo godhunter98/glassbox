@@ -61,7 +61,6 @@ class Authenticator:
         self,
         model: str | None = None,
         api_key: str | None = None,
-        login_token: str | None = None,
     ) -> AuthenticationSession | str | None:
         if self.auth_method.strip().lower() == "api_key":
             if not model or not api_key:

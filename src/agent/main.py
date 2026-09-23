@@ -7,12 +7,12 @@ def parse_args():
     import argparse
     parser = argparse.ArgumentParser(description="GlassBox CLI — transparent coding assistant")
     group = parser.add_mutually_exclusive_group()
-    
+
     group.add_argument("-r", "--resume", type=int, metavar="CONV_ID", help="Resume a conversation by its integer ID",)
     group.add_argument("-l", "--list", action="store_true", help="List all past conversations")
     group.add_argument("-n", "--new", action="store_true", help="Start a new session directly")
     group.add_argument("-c", "--configure", action="store_true", help="Configure a provider, API key, and model")
-    
+
     return parser.parse_args()
 
 

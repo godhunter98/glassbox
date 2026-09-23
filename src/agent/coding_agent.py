@@ -7,6 +7,7 @@ from typing import Any, Dict, List
 import json
 
 from prompt_toolkit import PromptSession
+from prompt_toolkit.keys import Keys
 from prompt_toolkit.application.current import get_app
 from prompt_toolkit.completion import ConditionalCompleter, WordCompleter
 from prompt_toolkit.filters import Condition
@@ -198,7 +199,13 @@ def print_error(context: str, message: str) -> None:
     print(f"{ERROR_COLOR}{ERROR_ICON} {context}: {message}{RESET_COLOR}")
 
 
-def llm_completions(conversation: list[dict[str, str]], session: AuthenticationSession, spinner: Spinner = None, show_ttft=True, quiet: bool = False):
+def llm_completions(
+    conversation: list[dict[str, str]],
+    session: AuthenticationSession,
+    spinner: Spinner = None,
+    show_ttft=True,
+    quiet: bool = False,
+) -> tuple[Any, int | None, int | None, int | None]:
     from litellm import litellm
 
     messages = conversation.copy()
@@ -206,9 +213,9 @@ def llm_completions(conversation: list[dict[str, str]], session: AuthenticationS
     if session.provider == "openai" and session.auth_method == "oauth":
         if spinner:
             spinner.stop()
-        all_messages = CodexRequest.conversation_to_codex_input(messages)
-        text = CodexRequest(session.model).generate_response(user_input = all_messages)
-        return text, None, None, None
+        codex_request = CodexRequest(model = session.model)
+        assistant_response = codex_request.generate_response(messages)
+        return (assistant_response, None, None, None)
 
     if session.model and session.api_key is not None:
         kwargs = {
@@ -604,7 +611,7 @@ def agent_loop(session: AuthenticationSession, max_iterations: int = 15, resume_
         if not conv:
             print_error("Resume Error", f"Conversation with ID {resume_id} not found. Starting a new session instead.")
             conversation = [{"role": "system", "content": SYSTEM_PROMPT}]
-            conv_row_id = queries.start_conversation(session.model)
+            conv_row_id = None
             session_total_tokens = 0
             session_state = Session_state()
         else:
@@ -619,8 +626,6 @@ def agent_loop(session: AuthenticationSession, max_iterations: int = 15, resume_
         # we create the conversation list and add the system prompt to it, but its not sent to the LLM until the user inputs a message, why waste an API call?
         conversation = [{"role": "system", "content": SYSTEM_PROMPT}]
         conv_row_id = None
-        if not evalmode:
-            conv_row_id = queries.start_conversation(session.model)
         session_total_tokens = 0
         session_state = Session_state()
 
@@ -641,7 +646,7 @@ def agent_loop(session: AuthenticationSession, max_iterations: int = 15, resume_
                 if not user_input.strip():
                     continue
 
-                # handle if any commands by the user
+                # handle if any commands by the user (650-690) command handling logic
                 command_result = command_runner.run(user_input)
                 if command_result.handled:
                     if command_result.message:
@@ -657,21 +662,40 @@ def agent_loop(session: AuthenticationSession, max_iterations: int = 15, resume_
                             print_error("Model error", models)
                             continue
 
-                        updated_model = questionary.select(
+                        question = questionary.select(
                             "Select a model:",
                             choices=models,
                             qmark="🤖",
-                        ).ask()
-                        if updated_model:
+                            instruction="Esc to cancel"
+                        )
+
+                        @question.application.key_bindings.add(Keys.Escape, eager=True)
+                        def cancel_with_escape(event):
+                            event.app.exit(result=None)
+
+                        updated_model = question.ask()
+
+                        if updated_model is not None:
                             session.model = updated_model
                             queries.update_conversation_model(conv_row_id, updated_model)
-                            print(f"{SUCCESS_COLOR}{SUCCESS_ICON} Using model: {updated_model}{RESET_COLOR}")
+                            print(
+                                f"{SUCCESS_COLOR}{SUCCESS_ICON} "
+                                f"Using model: {updated_model}{RESET_COLOR}"
+                            )
+                        else:
+                            print(
+                                f"{INFO_COLOR}Model selection cancelled. "
+                                f"Current model: {session.model}{RESET_COLOR}"
+                            )
                     continue
 
             else:
                 user_input = agent_input
 
             conversation.append({"role": "user", "content": user_input.strip() if user_input is not None else ""})
+
+            if not evalmode and conv_row_id is None:
+                conv_row_id = queries.start_conversation(session.model)
 
             if not evalmode:
                 queries.add_message(conversation_id=conv_row_id,role="user",content=user_input.strip()if user_input is not None else "")
@@ -724,8 +748,7 @@ def agent_loop(session: AuthenticationSession, max_iterations: int = 15, resume_
                             if prompt_tokens is not None and prompt_tokens - last_state_refresh_tokens >= STATE_INJECT_GROWTH and not evalmode:
                                 refreshed = refresh_session_state(
                                     conversation,
-                                    session.model,
-                                    session.api_key,
+                                    session,
                                     session_state,
                                 )
                                 if refreshed:
@@ -790,7 +813,7 @@ def agent_loop(session: AuthenticationSession, max_iterations: int = 15, resume_
         print()
 
     # Always generate summary and mark completed on exit
-    if not evalmode:
+    if not evalmode and conv_row_id is not None:
         try:
             conv_summary = generate_conversation_summary(conversation, session.model, session.api_key)
         except (KeyboardInterrupt, Exception) as e:

@@ -3,6 +3,7 @@ from agent.providers.openai_codex.codex_auth import fetch_credentials_for_reques
 import requests
 import jwt
 import json
+from typing import Any
 
 CODEX_ENDPOINT = "https://chatgpt.com/backend-api/codex/responses"
 
@@ -10,6 +11,8 @@ CODEX_ENDPOINT = "https://chatgpt.com/backend-api/codex/responses"
 
 class CodexRequest:
     '''Serve requests using the openAI codex auth'''
+
+    CodexInput = dict[str, str | list[dict[str, Any]] | None]
 
     def __init__(self, model: str = "gpt-5.5") -> None:
         self.model = model
@@ -24,16 +27,51 @@ class CodexRequest:
     @staticmethod
     def conversation_to_codex_input(
         conversation: list[dict[str, str]]
-    ) -> str:
-        return "".join(
-            f"{message["role"]}: {message["content"]} "
-            for message in conversation
-            if message.get("role") in {"system", "user", "assistant"}
-            and message.get("content")
-        )
+    ) -> CodexInput:
+        system_messages = ""
+        input_messages = []
+        tools = []
+        for message in conversation:
+            content = message.get("content")
+            role = message.get("role")
+            if role and content:
+                if role == "system":
+                    system_messages+=content
+                elif role == "user":
+                    input_messages.append(
+                        {"role": role,
+                        "content": [
+                                {"type": "input_text", "text": content}
+                            ]
+                        })
+                elif role == "assistant":
+                    input_messages.append(
+                        {"type": "message",
+                        "role": "assistant",
+                        "content": [
+                                {"type": "output_text", "text": content}
+                            ],
+                        "status": "completed",
+                        })
+                elif role == "tool":
+                    tools.append(content)
+        return {
+            "system": system_messages,
+            "input": input_messages,
+            "tool": None,
+        }
 
-    def generate_response(self, user_input: str):
+    def _build_payload(self, converted_conversation: CodexInput) -> dict:
+        payload = {
+            "model": self.model,
+            "stream": True, #codex backend does not allow us to use non-streaming responses
+            "store": False,
+        }
+        payload["instructions"] = converted_conversation.get("system")
+        payload["input"] = converted_conversation.get("input")
+        return payload
 
+    def generate_response(self, conversation: list[dict[str,str]]) -> str:
         self._get_credentials()
 
         if isinstance(self.id_token,str):
@@ -52,23 +90,9 @@ class CodexRequest:
             "Content-Type": "application/json",
             "Accept": "text/event-stream",
         }
-        payload = {
-        "model": self.model,  # Replace with your intended Codex-supported model
-        "input": [
-            {
-                "type": "message",
-                "role": "user",
-                "content": [
-                    {
-                        "type": "input_text",
-                        "text": user_input.strip(),
-                    }
-                ],
-            }
-        ],
-        "stream": True, #codex backend does not allow us to use non-streaming responses
-        "store":False
-        }
+
+        payload = self._build_payload(self.conversation_to_codex_input(conversation))
+
         response = requests.post(
             CODEX_ENDPOINT,
             headers=headers,
@@ -88,9 +112,16 @@ class CodexRequest:
             if data == "[DONE]":
                 break
 
-            event = json.loads(data)
+            try:
+                event = json.loads(data)
 
-            if event.get("type") == "response.output_item.done" and event.get("item",{}).get("phase")=="final_answer":
-                final_text = event["item"]["content"][0]["text"]
+                if event.get("type") == "response.output_item.done" and event.get("item",{}).get("phase")=="final_answer":
+                    final_text = event["item"]["content"][0]["text"]
+
+            except (json.JSONDecodeError, KeyError) as e:
+                final_text = f"Could not generate response due to {e}"
 
         return final_text
+
+    def __repr__(self) -> str:
+        return f"<CodexRequest(model={self.model!r}) at {hex(id(self))}>"
