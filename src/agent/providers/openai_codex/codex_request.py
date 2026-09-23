@@ -3,7 +3,9 @@ from agent.providers.openai_codex.codex_auth import fetch_credentials_for_reques
 import requests
 import jwt
 import json
+import time
 from typing import Any
+import time
 
 CODEX_ENDPOINT = "https://chatgpt.com/backend-api/codex/responses"
 
@@ -93,15 +95,44 @@ class CodexRequest:
 
         payload = self._build_payload(self.conversation_to_codex_input(conversation))
 
-        response = requests.post(
-            CODEX_ENDPOINT,
-            headers=headers,
-            json=payload,
-            stream=True,
-            timeout=60,
-        )
-        response.raise_for_status()
-        response.encoding = "utf-8"
+        current_attempt = 0
+        max_attempts = 3
+
+        while current_attempt < max_attempts:
+            try:
+                current_attempt += 1
+                response = requests.post(
+                    CODEX_ENDPOINT,
+                    headers=headers,
+                    json=payload,
+                    stream=True,
+                    timeout=60,
+                )
+                response.raise_for_status()
+                response.encoding = "utf-8"
+                break
+            except requests.exceptions.RequestException as error:
+                if isinstance(
+                    error,
+                    (requests.exceptions.Timeout, requests.exceptions.ConnectionError),
+                ):
+                    retryable = True
+                elif isinstance(error, requests.exceptions.HTTPError):
+                    status_code = (
+                        error.response.status_code
+                        if error.response is not None
+                        else None
+                    )
+                    retryable = status_code == 429 or (
+                        status_code is not None and 500 <= status_code < 600
+                    )
+                else:
+                    retryable = False
+
+                if not retryable or current_attempt == max_attempts:
+                    return f"Could not generate response due to {error}"
+
+                time.sleep(2 ** (current_attempt - 1))
 
         final_text = ""
         for line in response.iter_lines(decode_unicode=True):
