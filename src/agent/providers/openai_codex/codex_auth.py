@@ -8,6 +8,7 @@ import secrets
 import tempfile
 import threading
 import time
+import webbrowser
 from collections.abc import Callable, Mapping
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
@@ -152,6 +153,12 @@ async def prompt_for_callback() -> str | None:
 
 async def get_callback_url(authorization_url: str, state: str) -> str:
     """Wait for either the browser redirect or a pasted redirect URL."""
+
+    try:
+        webbrowser.open(authorization_url)
+    except Exception:
+        pass
+
     print("\nOpen the link below in your browser and log in with OpenAI:\n")
     print(f"{authorization_url}\n")
 
