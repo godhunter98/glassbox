@@ -7,6 +7,9 @@ from agent.pricing import calculate_cost
 _DB_INITIALIZED = False
 
 
+class DatabaseBusyError(sqlite3.OperationalError):
+    """Raised when SQLite remains locked after its configured wait period."""
+
 @contextmanager
 def get_db_cursor() -> sqlite3.Cursor:
     """Context manager for database connections. Handles commit/rollback automatically."""
@@ -14,15 +17,29 @@ def get_db_cursor() -> sqlite3.Cursor:
     global _DB_INITIALIZED
 
     if not _DB_INITIALIZED:
-        init_db()
+        try:
+            init_db()
+        except sqlite3.OperationalError as error:
+            if "locked" in str(error).lower() or "busy" in str(error).lower():
+                raise DatabaseBusyError(
+                    "The database is busy. Close other database sessions and try again."
+                ) from error
+            raise
         _DB_INITIALIZED = True
 
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=10)
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     try:
         yield cursor
         conn.commit()
+    except sqlite3.OperationalError as error:
+        conn.rollback()
+        if "locked" in str(error).lower() or "busy" in str(error).lower():
+            raise DatabaseBusyError(
+                "The database is busy. Close other database sessions and try again."
+            ) from error
+        raise
     except Exception:
         conn.rollback()
         raise
@@ -73,7 +90,7 @@ def update_conversation_stats(
 
         if not row:
             return
-        
+
         model = row["model"]
 
         try:
@@ -108,7 +125,7 @@ def add_message(conversation_id:int | None, role:str, content:str) -> int | None
     with get_db_cursor() as cursor:
         cursor.execute(
             '''
-            INSERT INTO messages 
+            INSERT INTO messages
             (conversation_id, role, content)
             VALUES (?, ?, ?)
             ''',
@@ -133,7 +150,7 @@ def mark_conversation_completed(conversation_id: int, final_summary: str = None)
     with get_db_cursor() as cursor:
         cursor.execute(
             """
-            UPDATE conversations 
+            UPDATE conversations
             SET status = 'completed', ended_at = CURRENT_TIMESTAMP, summary = COALESCE(?, summary)
             WHERE conversation_id = ?
             """,
@@ -157,7 +174,7 @@ def get_conversation_messages(conversation_id: int):
             '''
             SELECT * FROM messages WHERE conversation_id = ? ORDER BY message_id ASC
             ''',
-            (conversation_id,),        
+            (conversation_id,),
         )
         return cursor.fetchall()
 

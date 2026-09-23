@@ -59,8 +59,12 @@ def main():
                 return
 
     from agent.coding_agent import agent_loop
+    from agent.storage.queries import DatabaseBusyError
 
-    agent_loop(session, 10, resume_id=resume_id)
+    try:
+        agent_loop(session, 10, resume_id=resume_id)
+    except DatabaseBusyError as error:
+        print(error)
 
 if __name__ == "__main__":
     main()

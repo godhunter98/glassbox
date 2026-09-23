@@ -155,7 +155,7 @@ async def get_callback_url(authorization_url: str, state: str) -> str:
     """Wait for either the browser redirect or a pasted redirect URL."""
 
     try:
-        webbrowser.open(authorization_url)
+        webbrowser.open_new(authorization_url)
     except Exception:
         pass
 

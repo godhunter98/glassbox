@@ -7,7 +7,7 @@ def init_db():
     '''
     Esure db is created, connected to and the required tables are created on the fly.
     '''
-    with sqlite3.connect(DB_PATH) as conn:
+    with sqlite3.connect(DB_PATH, timeout=10) as conn:
         cursor = conn.cursor()
 
         cursor.execute(

@@ -631,6 +631,7 @@ def agent_loop(session: AuthenticationSession, max_iterations: int = 15, resume_
 
     show_ttft = True
     last_state_refresh_tokens = 0
+    database_busy = False
 
     try:
         while True:
@@ -773,8 +774,7 @@ def agent_loop(session: AuthenticationSession, max_iterations: int = 15, resume_
                             print(f"{INFO_COLOR}  ✂️  Pruned conversation: {before_count} → {len(conversation)} messages{RESET_COLOR}")
                             refreshed = refresh_session_state(
                                     conversation,
-                                    session.model,
-                                    session.api_key,
+                                    session,
                                     session_state,
                                 )
                             if refreshed:
@@ -811,15 +811,20 @@ def agent_loop(session: AuthenticationSession, max_iterations: int = 15, resume_
 
     except KeyboardInterrupt:
         print()
+    except queries.DatabaseBusyError as error:
+        database_busy = True
+        print(f"\n{ERROR_COLOR}{ERROR_ICON} {error}{RESET_COLOR}")
 
     # Always generate summary and mark completed on exit
-    if not evalmode and conv_row_id is not None:
+    if not evalmode and conv_row_id is not None and not database_busy:
         try:
             conv_summary = generate_conversation_summary(conversation, session.model, session.api_key)
         except (KeyboardInterrupt, Exception) as e:
             print(f"\n{INFO_COLOR}Summary skipped ({type(e).__name__}){RESET_COLOR}")
             conv_summary = "Untitled session"
 
-
-        queries.mark_conversation_completed(conv_row_id, conv_summary)
+        try:
+            queries.mark_conversation_completed(conv_row_id, conv_summary)
+        except queries.DatabaseBusyError as error:
+            print(f"\n{ERROR_COLOR}{ERROR_ICON} Could not save conversation summary: {error}{RESET_COLOR}")
         print(f"\n{INFO_COLOR}Goodbye! 👋{RESET_COLOR}")
