@@ -40,8 +40,10 @@ from agent.ui import (
     SUCCESS_ICON,
     ERROR_ICON,
 )
+from agent.ui import render_usage
 from agent.context_manager import truncate_tool_output, mask_old_observations, Session_state , prune_conversation
 from agent.providers.openai_codex.codex_request import CodexRequest
+from agent.contracts import CompletionResult, CompletionMetrics
 
 from contextlib import nullcontext
 from contextlib import redirect_stdout, redirect_stderr
@@ -205,7 +207,7 @@ def llm_completions(
     spinner: Spinner = None,
     show_ttft=True,
     quiet: bool = False,
-) -> tuple[Any, int | None, int | None, int | None]:
+) -> CompletionResult:
     from litellm import litellm
 
     messages = conversation.copy()
@@ -213,9 +215,11 @@ def llm_completions(
     if session.provider == "openai" and session.auth_method == "oauth":
         if spinner:
             spinner.stop()
+        start_time = time.perf_counter()
         codex_request = CodexRequest(model = session.model)
         assistant_response = codex_request.generate_response(messages)
-        return (assistant_response, None, None, None)
+        render_usage(assistant_response.metrics, quiet, show_ttft, thinking_mode=False)
+        return assistant_response
 
     if session.model and session.api_key is not None:
         kwargs = {
@@ -228,7 +232,7 @@ def llm_completions(
             "stream":True,
             "extra_body":{"thinking": {"type": "disabled"}}
         }
-
+        thinking_mode = True if kwargs["extra_body"]["thinking"] == {"type": "enabled"} else False
         # Allow overriding the LLM base URL without changing call sites.
         api_base = get_api_base()
         if api_base:
@@ -291,8 +295,9 @@ def llm_completions(
                 prompt_tokens = getattr(usage, "prompt_tokens", None)
                 completion_tokens = getattr(usage, "completion_tokens", None)
                 total_tokens = getattr(usage, "total_tokens", None)
+                completion_metrics: CompletionMetrics | None = None
 
-                if prompt_tokens is not None:
+                if prompt_tokens is not None and end_time:
                     pct = prompt_tokens / DEEPSEEK_MAX_CONTEXT
                     bar_width = 30
                     filled = int(bar_width * pct)
@@ -310,18 +315,16 @@ def llm_completions(
                     if not quiet:
                         print(f"  Context: [{bar}] {prompt_tokens:,} / {DEEPSEEK_MAX_CONTEXT:,} ({pct:.1%})")
 
-                if start_time is not None and completion_tokens and completion_tokens > 0:
-                    duration = end_time - start_time
-                    tps = completion_tokens / duration
-                    if not quiet:
-                        if show_ttft:
-                            print(f"{INFO_COLOR}  [ {ttft:.1f}s - 1st token ]{RESET_COLOR}")
-                        if kwargs.get("extra_body", {}).get("thinking") == {"type": "disabled"}:
-                            print(f"{INFO_COLOR}  [ {tps:.1f} toks/s | {completion_tokens} tokens in {duration:.2f}s | Thinking_Mode 🧠: ❌ ]{RESET_COLOR}\n")
-                        else:
-                            print(f"{INFO_COLOR}  [ {tps:.1f} toks/s | {completion_tokens} tokens in {duration:.2f}s | Thinking_Mode 🧠 : ✅ ]{RESET_COLOR}\n")
+                    completion_metrics = CompletionMetrics(
+                        input_tokens=prompt_tokens,
+                        output_tokens=completion_tokens,
+                        total_tokens=total_tokens,
+                        ttft_seconds=ttft,
+                        duration_seconds=end_time - start_time,
+                    )
+                    render_usage(completion_metrics, quiet, show_ttft, thinking_mode)
 
-                return full_response, prompt_tokens, total_tokens, completion_tokens
+                return CompletionResult(response=full_response, metrics=completion_metrics)
 
             except Exception as e:
                 last_error = e
@@ -336,8 +339,9 @@ def llm_completions(
             print(
                 f"{INFO_COLOR}Make sure you have set up your API keys in the .env file{RESET_COLOR}"
             )
-            print(f"{INFO_COLOR}Current model: {model}{RESET_COLOR}")
-        return f"I encountered an error: {error_msg}. Please check your API key configuration.", None, None, None
+            print(f"{INFO_COLOR}Current model: {session.model}{RESET_COLOR}")
+
+        return CompletionResult(response=f"I encountered an error: {error_msg}. Please check your API key configuration.", metrics=None, error=last_error)
 
     else:
         error_msg = "Missing environment variable: MODEL or API_KEY"
@@ -346,7 +350,11 @@ def llm_completions(
             print(
                 f"{INFO_COLOR}Please set MODEL and API_KEY in your .env file{RESET_COLOR}"
             )
-        return f"I encountered an error: {error_msg}. Please check your .env file configuration.", None, None, None
+        return CompletionResult(
+            response=f"I encountered an error: {error_msg}. Please check your .env file configuration.",
+            metrics=None,
+            error=RuntimeError("ConfigurationError"),
+        )
 
 
 def run_tool_call(
@@ -709,16 +717,27 @@ def agent_loop(session: AuthenticationSession, max_iterations: int = 15, resume_
             while current_iteration<=max_iterations:
                 current_iteration+=1
 
-                response, prompt_tokens, total_tokens,completion_tokens = llm_completions(conversation, session, spinner=spinner,show_ttft=show_ttft,quiet=quiet)
+                result = llm_completions(conversation, session, spinner=spinner,show_ttft=show_ttft,quiet=quiet)
+                response = result.response
+                metrics = result.metrics
 
-                if total_tokens is not None and not evalmode:
-                    session_total_tokens += total_tokens
+                if result.error is not None:
+                    if spinner:
+                        spinner.stop()
+                    if not quiet:
+                        print_error("Provider error", str(result.error))
+                    if evalmode:
+                        return str(response)
+                    break
+
+                if metrics is not None and not evalmode:
+                    session_total_tokens += metrics.total_tokens
                     usage = getattr(response, "usage", None)
                     queries.update_conversation_stats(
                         conv_row_id,
                         total_tokens=session_total_tokens,
-                        input_tokens=prompt_tokens,
-                        output_tokens=completion_tokens,
+                        input_tokens=metrics.input_tokens,
+                        output_tokens=metrics.output_tokens,
                         cache_hit_tokens=getattr(usage, "prompt_cache_hit_tokens", 0) or 0,
                         cache_miss_tokens=getattr(usage, "prompt_cache_miss_tokens", None),
                     )
@@ -746,7 +765,7 @@ def agent_loop(session: AuthenticationSession, max_iterations: int = 15, resume_
                         handle_assistant_message(assistant_message, conversation, conv_row_id, session_state, quiet)
 
                         if not assistant_message.tool_calls:
-                            if prompt_tokens is not None and prompt_tokens - last_state_refresh_tokens >= STATE_INJECT_GROWTH and not evalmode:
+                            if metrics is not None and metrics.input_tokens is not None and metrics.input_tokens - last_state_refresh_tokens >= STATE_INJECT_GROWTH and not evalmode:
                                 refreshed = refresh_session_state(
                                     conversation,
                                     session,
@@ -757,18 +776,18 @@ def agent_loop(session: AuthenticationSession, max_iterations: int = 15, resume_
                                         "role": "system",
                                         "content": f"Internal session state summary:\n{session_state.render()}",
                                     })
-                                    last_state_refresh_tokens = prompt_tokens
+                                    last_state_refresh_tokens = metrics.input_tokens
                             if evalmode:
                                 return assistant_message.content or ""
                             break
 
 
                         # Follow a laddered approach, if masking old observations is not enough, prune
-                        if prompt_tokens is not None and prompt_tokens > CONTEXT_LIMIT and not evalmode:
+                        if metrics is not None and metrics.input_tokens is not None and metrics.input_tokens > CONTEXT_LIMIT and not evalmode:
                             print(f"{INFO_COLOR}  📦 Compacting context (masking old tool outputs)...{RESET_COLOR}")
                             mask_old_observations(conversation, keep_last_n=1)
 
-                        if prompt_tokens is not None and prompt_tokens > HARD_LIMIT and not evalmode:
+                        if metrics is not None and metrics.input_tokens is not None and metrics.input_tokens > HARD_LIMIT and not evalmode:
                             before_count = len(conversation)
                             prune_conversation(conversation,10)
                             print(f"{INFO_COLOR}  ✂️  Pruned conversation: {before_count} → {len(conversation)} messages{RESET_COLOR}")
@@ -783,7 +802,7 @@ def agent_loop(session: AuthenticationSession, max_iterations: int = 15, resume_
                                     "role": "system",
                                     "content": f"Internal session state summary:\n{session_state.render()}",
                                 })
-                                last_state_refresh_tokens = prompt_tokens
+                                last_state_refresh_tokens = metrics.input_tokens
                         spinner.start() if spinner else None
                         continue
 
